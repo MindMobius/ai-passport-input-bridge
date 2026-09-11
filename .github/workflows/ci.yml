@@ -1,0 +1,38 @@
+name: ci
+
+# 轻量 CI:只跑"不需要硬件、不依赖 Windows/macOS 专属路径"的检查。
+# 固件构建需要 ESP-IDF(本地/自建 runner 跑 build-firmware.cmd),这里不覆盖。
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  python:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: 语法编译(全仓库 Python)
+        run: python -m compileall -q companion tools tests
+
+      - name: 纯逻辑单元测试
+        run: |
+          python companion/tests/test_adpcm.py
+          python companion/tests/test_serial_frame.py
+
+      - name: 固件镜像校验工具自测
+        run: python tests/test_verify_firmware.py
+
+      - name: 配置文件必须是合法 JSON
+        run: |
+          python - <<'PY'
+          import json, pathlib
+          for p in ("companion/wechat_config.example.json", "companion/config.example.json"):
+              json.loads(pathlib.Path(p).read_text(encoding="utf-8"))
+              print("ok", p)
+          PY
