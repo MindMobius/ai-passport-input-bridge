@@ -64,6 +64,8 @@ echo [3/4] 安装依赖(首次约 1~2 分钟,取决于网络)...
 if errorlevel 1 (
   echo [XX] 依赖安装失败。检查网络后重跑本脚本;公司网络需要代理时先设:
   echo        set HTTPS_PROXY=http://user:pass@proxy:port
+  echo      另外:Python 3.13/3.14 上 pywin32 等依赖可能还没有 wheel,
+  echo      装个 Python 3.12 再跑本脚本即可（本项目实测区间是 3.10~3.12）。
   echo.
   pause
   exit /b 1
@@ -107,5 +109,7 @@ echo   1. 双击 doctor.cmd        -^> 体检。缺什么它会直接说(虚拟�
 echo   2. 双击 open-console.cmd  -^> 选通道 -^> 保存并重连
 echo   3. 设备上: UP 说话 / 任意键结束 / DOWN 粘贴 / OK 发送
 echo.
+rem 被 setup.cmd 调用时不停在这里（它后面还有虚拟声卡检查与打开控制台）
+if /i "%~1"=="nopause" exit /b 0
 echo.
 pause
