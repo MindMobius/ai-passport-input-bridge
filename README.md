@@ -41,10 +41,16 @@
 `cardid`/`recovery`/NVS/分区表;USB 全流程(音频回环 + 粘贴/回车注入);Windows BLE 配对、
 连接、断线自愈;会话内默认麦克风切换与还原;控制台配置读写与启停;设备身份上报
 (`device.hello` 带固件版本/芯片/Flash/MAC)与控制台设备信息面板;PC 状态心跳
-(`bridge.status`)与设备屏幕连接信息行。
+(`bridge.status`)与设备屏幕连接信息行;BLE 真人语音端到端(按 UP 说话 → ADPCM 上行 →
+写虚拟声卡 → 微信输入法转写落字)。
 
-**未实测**:BLE 音频端到端(ADPCM 解码后真实转写)在 Windows 上还没跑过真人语音;
-`companion/tests/` 有一批测试按 macOS 路径写的(`os.openpty`、`pytest-asyncio`),Windows 上会失败。
+**待改进**:BLE 音频帧丢失偏高 —— 两段真人会话实测 18.2% / 18.9%(PC 侧对账;同一次
+设备侧另报 3 次源端丢帧),对话仍能转写但余量薄。线索:实际通知载荷 256B(协商 MTU ≈259),
+低于设计假设的 517;发送环只容 1 块、无抖动吸收(`docs/AUDIT_2026-08-26.md` P1-4)。
+USB 通道同一设备此前链路测试为 `audio_drops=0`(尚未跑过 USB 真人语音对照)。
+
+另外,`companion/tests/` 有一批测试按 macOS 路径写的(`os.openpty`、`pytest-asyncio`),
+Windows 上会失败。
 
 ## 命名与后续
 
