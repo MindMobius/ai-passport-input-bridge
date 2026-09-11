@@ -14,6 +14,51 @@ from relay import AUDIO_UUID, EVENT_UUID, CTRL_UUID, Relay  # noqa: E402
 from virtual_asr import VirtualMicSession  # noqa: E402
 from virtual_mic import NullMicSink, resample_pcm16_mono  # noqa: E402
 from wechat_bridge_config import DEFAULTS  # noqa: E402
+from wechat_bridge import (  # noqa: E402
+    build_device_info,
+    client_status_payload,
+    write_device_info,
+)
+
+
+def test_device_info_from_hello(tmp_path):
+    """device.hello → 设备信息:设备上报字段照抄,缺字段留空(不编造)。"""
+    ev = {"event": "device.hello", "proto": 2, "chip": "ESP32-C3 r1.1",
+          "flash_mb": 8, "mac": "4C:11:AE:32:F1:4A", "fw": "v2026.09.11", "idf": "v5.5.3"}
+    info = build_device_info(ev, {"channel": "usb"})
+    assert info["mcu"] == "ESP32-C3 r1.1"
+    assert info["flash"] == "8 MB"
+    assert info["mac"] == "4C:11:AE:32:F1:4A"
+    assert info["fw"] == "v2026.09.11"
+    assert info["model"]  # 档案里的硬件事实仍在
+    assert "fw=v2026.09.11" in info["source"]
+
+    # 旧固件只有 proto:不写假值,面板按 "--" 渲染
+    old = build_device_info({"event": "device.hello", "proto": 1}, {"channel": "ble"})
+    assert old["mcu"] == "" and old["mac"] == "" and old["flash"] == ""
+
+    # 落盘是原子替换 + 合法 JSON
+    path = tmp_path / "device.json"
+    written = write_device_info(path, ev, {"channel": "usb"})
+    assert json.loads(path.read_text(encoding="utf-8")) == written
+    assert not (tmp_path / "device.json.tmp").exists()
+
+
+def test_client_status_payload_respects_mic_auto():
+    on = client_status_payload({"audio_device": "CABLE Input", "mic_auto_switch": True,
+                                "mic_switch_target": "CABLE Output"})
+    assert on["auto"] is True and on["mic"] == "CABLE Output" and on["sink"] == "CABLE Input"
+    assert on["host"]  # 主机名非空,设备屏幕用它显示"谁在连"
+    off = client_status_payload({"audio_device": "CABLE Input", "mic_auto_switch": False,
+                                 "mic_switch_target": "CABLE Output"})
+    assert off["auto"] is False and off["mic"] == ""   # 显示 MIC AUTO OFF,不谎报切换目标
+
+
+def test_client_status_payload_truncates_for_screen():
+    """设备端字段上限 24B(含 NUL):超长名必须在此截断,不能靠设备丢字段。"""
+    payload = client_status_payload({"audio_device": "X" * 80, "mic_auto_switch": True,
+                                     "mic_switch_target": "Y" * 80})
+    assert len(payload["sink"]) <= 23 and len(payload["mic"]) <= 23
 
 
 def test_resample_16k_mono_to_48k_stereo():

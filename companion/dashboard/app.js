@@ -20,6 +20,13 @@ const KEYMAP = [
   { key: "OK", sub: "单击 / 长按", action: "发送（回车）", field: "enter_hotkey" },
 ];
 
+// 按键录制状态:同时只允许一行在录,避免多行争抢 keydown
+let recordingField = null;
+let recordHeld = [];
+let recordAll = [];
+let recordGotKey = false;
+let keymapBuilt = false;
+
 function reportClient(kind, message, extra = {}) {
   try {
     fetch("/api/client-log", {
@@ -59,6 +66,13 @@ function applyConfig(cfg) {
   if (!cfg) return;
   fields.forEach((key) => { if ($(key) && cfg[key] !== undefined) $(key).value = cfg[key]; });
   checks.forEach((key) => { if ($(key)) $(key).checked = !!cfg[key]; });
+  // 按键映射面板与"参数调整"共用同一批字段:两处都要跟上(正在输入的那个除外)
+  KEYMAP.forEach((item) => {
+    const input = kmInput(item.field);
+    if (input && document.activeElement !== input && cfg[item.field] !== undefined) {
+      input.value = cfg[item.field];
+    }
+  });
   selectedChannel = cfg.channel === "ble" ? "ble" : "usb";
   document.querySelectorAll("#channel-tabs button").forEach((b) => {
     b.classList.toggle("active", b.dataset.channel === selectedChannel && !b.disabled);
@@ -76,18 +90,110 @@ function collectConfig() {
 }
 
 function renderKeymap() {
-  const cfg = state.config || {};
-  $("keymap-grid").innerHTML = KEYMAP.map((item) => {
-    const combo = String(cfg[item.field] || "--");
-    const keys = combo.split(/[+,]/).map((k) => k.trim()).filter(Boolean)
-      .map((k) => `<kbd>${k.toUpperCase()}</kbd>`).join("");
-    return `<div class="km-cell">
+  // 只建一次 DOM:每 2s 重建会把正在输入的焦点/光标位置一起干掉
+  if (keymapBuilt) return;
+  keymapBuilt = true;
+  $("keymap-grid").innerHTML = KEYMAP.map((item) => `
+      <div class="km-cell">
         <span class="km-key">${item.key}<em>${item.sub}</em></span>
         <strong>${item.action}</strong>
-        <span class="km-keys">${keys || '<kbd>--</kbd>'}</span>
-      </div>`;
-  }).join("");
+        <div class="km-edit">
+          <input class="km-input" id="km-${item.field}" spellcheck="false" autocomplete="off"
+                 aria-label="${item.action} 组合键">
+          <button class="km-rec" data-field="${item.field}" title="点这里再按目标按键">录制</button>
+        </div>
+      </div>`).join("");
+  $("keymap-grid").querySelectorAll(".km-rec").forEach((btn) => {
+    btn.addEventListener("click", () => startRecord(btn.dataset.field, btn));
+  });
+  bindKeymapMirrors();
 }
+
+// 映射面板与参数面板是同一份配置的两个视图:任一处改动立刻镜像到另一处,
+// 免得两个输入框各说各话(保存时以哪边为准会变成"看运气")。
+function bindKeymapMirrors() {
+  KEYMAP.forEach((item) => {
+    const km = kmInput(item.field);
+    const param = $(item.field);
+    if (!km || !param) return;
+    km.addEventListener("input", () => { param.value = km.value; });
+    param.addEventListener("input", () => { km.value = param.value; });
+  });
+}
+
+function kmInput(field) {
+  return document.getElementById(`km-${field}`);
+}
+
+function comboFromEvent(e, held) {
+  const mods = [];
+  if (e.ctrlKey || held.includes("ctrl")) mods.push("ctrl");
+  if (e.metaKey || held.includes("win")) mods.push("win");
+  if (e.altKey || held.includes("alt")) mods.push("alt");
+  if (e.shiftKey || held.includes("shift")) mods.push("shift");
+  const key = e.key;
+  if (["Control", "Meta", "Alt", "Shift"].includes(key)) {
+    const name = key === "Meta" ? "win" : key.toLowerCase();
+    return [...new Set([...mods, name])].join("+");
+  }
+  return [...mods, key.length === 1 ? key.toLowerCase() : key.toLowerCase()].join("+");
+}
+
+function startRecord(field, btn) {
+  stopRecord();
+  recordingField = field;
+  recordHeld = [];
+  recordAll = [];
+  recordGotKey = false;
+  btn.textContent = "按键中…";
+  btn.classList.add("recording");
+}
+
+function stopRecord() {
+  recordingField = null;
+  recordHeld = [];
+  recordAll = [];
+  recordGotKey = false;
+  $("keymap-grid").querySelectorAll(".km-rec").forEach((b) => {
+    b.textContent = "录制";
+    b.classList.remove("recording");
+  });
+}
+
+window.addEventListener("keydown", (e) => {
+  if (!recordingField) return;
+  e.preventDefault();
+  if (e.key === "Escape") {   // Esc = 取消本次录制,不改写原值
+    stopRecord();
+    return;
+  }
+  const modifierKey = ["Control", "Meta", "Alt", "Shift"].includes(e.key);
+  if (modifierKey) {
+    // 修饰键单独按下不立刻定稿:否则 ctrl+shift+v 会在 ctrl 上就结束
+    const name = e.key === "Meta" ? "win" : e.key.toLowerCase();
+    if (!recordHeld.includes(name)) recordHeld.push(name);
+    if (!recordAll.includes(name)) recordAll.push(name);
+    return;
+  }
+  recordGotKey = true;
+  const input = kmInput(recordingField);
+  if (input) input.value = comboFromEvent(e, recordHeld);
+  stopRecord();
+}, true);
+
+window.addEventListener("keyup", (e) => {
+  if (!recordingField) return;
+  const modifierKey = ["Control", "Meta", "Alt", "Shift"].includes(e.key);
+  if (!modifierKey) return;
+  e.preventDefault();
+  const name = e.key === "Meta" ? "win" : e.key.toLowerCase();
+  recordHeld = recordHeld.filter((m) => m !== name);
+  if (recordHeld.length || recordGotKey) return;
+  // 全程只按了修饰键(例如想映射 Shift 结束语音):松手时定稿这个组合
+  const input = kmInput(recordingField);
+  if (input) input.value = recordAll.join("+");
+  stopRecord();
+}, true);
 
 function renderChannelNote() {
   const usb = devices.usb || {};
@@ -226,6 +332,13 @@ $("channel-tabs").addEventListener("click", (e) => {
 });
 
 $("btn-save").addEventListener("click", async () => { await saveConfig(); await refresh(); });
+$("btn-save-keymap").addEventListener("click", async () => { await saveConfig(); await refresh(); });
+$("btn-apply-keymap").addEventListener("click", async () => {
+  const cfg = await saveConfig();
+  await api("/api/bridge", { method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ action: "restart", channel: cfg.channel }) });
+  setTimeout(refresh, 900);
+});
 $("btn-apply").addEventListener("click", async () => {
   const cfg = await saveConfig();
   await api("/api/bridge", { method: "POST", headers: { "Content-Type": "application/json" },

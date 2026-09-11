@@ -199,7 +199,8 @@ never talks to the network beyond `127.0.0.1`.
 | 连接配置 | USB / BLE / WiFi 通道选择、设备路径、Bridge 一键重启或停止 |
 | 参数调整 | 虚拟声卡、热键、目标窗口正则、采样率/声道/超时,写回 `companion/wechat_config.json` |
 | 状态监控 | 连接相位、电池、链路、丢帧、语音状态、最后按键、事件流 |
-| 按键映射 | 按当前配置渲染 UP / DOWN / OK 的实际键位 |
+| 按键映射 | 就地编辑/录制每个手势触发的电脑按键（与“参数调整”同源，改一处两处同步） |
+| 设备信息 | 设备 `device.hello` 上报的型号/MCU/Flash/显示/音频/USB ID/序列号/固件版本（落盘 `build/wechat/device.json`） |
 | 运行日志 | Bridge 的 stdout / stderr 实时尾部 |
 
 Why the default microphone keeps working:
@@ -230,6 +231,13 @@ Facts worth knowing:
 The device screen uses the same black-line theme as the panel (`main/ui_pixel.h`
 holds the shared palette); the PC console and the 240x320 panel deliberately use
 one visual language.
+
+The panel also mirrors this in the other direction: the device screen carries two
+status lines (`LINK <channel> / PC <ONLINE|WAITING>` and the microphone/sink the
+bridge is driving) fed by the bridge's 2s `bridge.status` heartbeat, plus a
+diagnostic line on the READY page (battery mV, BLE MTU, audio/event drops). If the
+bridge process dies without dropping the link, the device flips back to
+`PC WAITING` on its own after 6s of silence.
 
 ## Known limitations
 

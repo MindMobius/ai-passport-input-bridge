@@ -395,6 +395,7 @@ class Relay:
 
     def __init__(self, transport=None, *, asr_factory=None, inject_fn=None,
                  key_action_fn=None, on_phase=None, on_candidate=None,
+                 on_device_info=None,
                  timeout=60.0, do_inject=True, do_approval=True, dry_run=False,
                  connect_timeout_s=5.0, stdin_input=None):
         # Dependency-injected mode must not import the cloud ASR or macOS
@@ -417,6 +418,12 @@ class Relay:
         # 预览由悬浮窗取代, transcript 下行停发; None(默认)时 CLI 行为不变,
         # 中间结果照旧下行设备屏幕预览。
         self._on_candidate = on_candidate
+        # device.hello 回调:on_device_info(ev: dict)。设备在新固件里会上报
+        # 固件版本/芯片/Flash/MAC,控制台"设备信息"面板据此落盘(旧固件只有
+        # proto,回调照样触发,字段按缺失处理)。
+        self._on_device_info = on_device_info
+        self._status_fail_logged = False   # bridge.status 下行失败只报一次状态翻转
+        self._status_ok_ever = False       # 启动阶段(还没连上)的失败不刷日志
         self._transport = transport or BleakTransport()
         # USB 通道扩展探测:transport 带 send_syscmd(SerialTransport) →
         # 启用 stdin `!命令` 交互(USB 模式无控制台)与通道专属提示
@@ -719,6 +726,14 @@ class Relay:
         etype = ev.get("event")
         if etype == "device.hello":
             print(f"[event] device.hello proto={ev.get('proto')}")
+            if ev.get("chip") or ev.get("fw"):
+                print(f"[event] 设备身份: {ev.get('chip', '--')} "
+                      f"fw={ev.get('fw', '--')} mac={ev.get('mac', '--')}")
+            if self._on_device_info is not None:
+                try:
+                    self._on_device_info(ev)
+                except Exception as e:      # 回调异常不得打断事件流
+                    print(f"[event] device.hello 回调异常: {e}", file=sys.stderr)
         elif etype == "key.action":
             await self._on_key_action(ev.get("action"))
         elif etype == "voice.start":
@@ -919,6 +934,29 @@ class Relay:
             await self._transport.write_gatt_char(CTRL_UUID, payload)
         except Exception as e:
             raise RelayError(f"CTRL 写入失败: {e}") from e
+
+    async def send_client_status(self, info):
+        """下行 bridge.status(电脑端心跳:主机名/虚拟声卡/麦克风切换)。
+
+        设备屏幕的"连接信息"行据此显示 PC 侧状态;心跳超时(6s)设备自己
+        翻回 WAITING。尽力而为:未连接/写失败返回 False,不抛 —— 调用方是
+        2s 周期的后台任务,失败状态只在翻转时打印一次,避免刷屏。
+        """
+        try:
+            await self._send_ctrl({"type": "bridge.status", **info})
+        except Exception as e:
+            # 只报"曾经成功过之后又失败"的翻转:启动阶段设备还没连上,
+            # 每个 2s 周期都失败是正常现象,不该刷日志。
+            if self._status_ok_ever and not self._status_fail_logged:
+                self._status_fail_logged = True
+                print(f"[status] bridge.status 下行失败(设备未连接?): {e}",
+                      file=sys.stderr)
+            return False
+        self._status_ok_ever = True
+        if self._status_fail_logged:
+            self._status_fail_logged = False
+            print("[status] bridge.status 下行已恢复")
+        return True
 
     async def _sync_time(self):
         """下行 wall-clock 校时(UTC epoch 秒)。
@@ -1334,5 +1372,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-
-

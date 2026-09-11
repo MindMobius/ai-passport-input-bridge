@@ -14,6 +14,8 @@
 ```
 
 设备端只负责麦克风 + 三个键 + 屏幕;所有和系统/输入法对接的事都在电脑侧,所以**电脑端必须运行**。
+设备屏幕常显两行连接信息(链路通道 / 电脑端是否在线 / 麦克风落在哪个设备),
+就绪页再补一行实测值(电量 mV、BLE MTU、音频/事件丢帧)。
 
 ## 快速开始
 
@@ -26,7 +28,7 @@
 |---|---|---|
 | 固件 | `main/` `components/` `bootloader_components/` `partitions.csv` | ESP32-C3:ES8311 音频、ST7789 屏幕、BLE + USB 双通道常开、Recovery 分区保留 |
 | 电脑桥接 | `companion/` | USB/BLE 收流 → 虚拟声卡;热键/剪贴板注入;会话内临时切默认麦克风 |
-| 本地控制台 | `companion/dashboard/` + `dashboard_server.py` | 纯黑线条风配置页:连接配置 / 参数 / 状态 / 按键映射 / 日志 |
+| 本地控制台 | `companion/dashboard/` + `dashboard_server.py` | 纯黑线条风配置页:连接配置 / 参数 / 状态 / 按键映射(可编辑+录制)/ 设备信息 / 日志 |
 | 工具 | `tools/` | 构建、烧录、校验、体检、虚拟声卡回环测试 |
 | 固件主机测试 | `tests/` | 状态机/协议/音频/USB 链路的 x86 host 测试(不依赖硬件) |
 | 硬件实测记录 | `docs/` | 硬件调试、性能/内存复核、代码审查记录 |
@@ -35,7 +37,9 @@
 
 **已实测**:固件可编译并通过 `tools/verify_firmware.py` 校验;应用分区可烧录且不动
 `cardid`/`recovery`/NVS/分区表;USB 全流程(音频回环 + 粘贴/回车注入);Windows BLE 配对、
-连接、断线自愈;会话内默认麦克风切换与还原;控制台配置读写与启停。
+连接、断线自愈;会话内默认麦克风切换与还原;控制台配置读写与启停;设备身份上报
+(`device.hello` 带固件版本/芯片/Flash/MAC)与控制台设备信息面板;PC 状态心跳
+(`bridge.status`)与设备屏幕连接信息行。
 
 **未实测**:BLE 音频端到端(ADPCM 解码后真实转写)在 Windows 上还没跑过真人语音;
 `companion/tests/` 有一批测试按 macOS 路径写的(`os.openpty`、`pytest-asyncio`),Windows 上会失败。

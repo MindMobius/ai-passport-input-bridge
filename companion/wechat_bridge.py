@@ -10,6 +10,8 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import json
+import socket
 import re
 import sys
 import time
@@ -28,6 +30,53 @@ from virtual_asr import VirtualMicSession
 from win_default_mic import make_switcher
 from virtual_mic import NullMicSink, VirtualMicError, make_sink
 from wechat_bridge_config import load_config
+
+
+# 板卡档案:这些是硬件事实(型号/屏幕/音频链路/USB 描述符),设备不上报,
+# 但控制台"设备信息"面板需要显示。芯片/Flash/MAC/固件版本一律以设备上报为准
+# (device.hello),档案里不重复写 —— 免得两处数据源打架。
+DEVICE_PROFILE = {
+    "model": "FoloToy AI Passport",
+    "display": "ST7789 240x320",
+    "audio": "ES8311 16 kHz mono",
+    "usb_vid_pid": "303A:1001",
+}
+
+
+def _write_json(path: Path, obj: dict) -> None:
+    """原子写(临时文件 + replace):控制台随时在读,不能读到半个 JSON。"""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_suffix(path.suffix + ".tmp")
+    tmp.write_text(json.dumps(obj, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    tmp.replace(path)
+
+
+def build_device_info(ev: dict, cfg: dict) -> dict:
+    """device.hello + 板卡档案 → 控制台"设备信息"面板的数据。
+
+    设备上报的字段一律照抄;档案补设备压根不上报的硬件事实。任何字段取不到
+    就留空,由前端渲染成 "--" —— 不用占位符冒充真值。
+    """
+    flash_mb = ev.get("flash_mb")
+    return {
+        **DEVICE_PROFILE,
+        "mcu": ev.get("chip") or "",
+        "flash": f"{flash_mb} MB" if isinstance(flash_mb, int) and flash_mb > 0 else "",
+        "mac": ev.get("mac") or "",
+        "fw": ev.get("fw") or "",
+        "idf": ev.get("idf") or "",
+        "proto": ev.get("proto"),
+        "channel": cfg.get("channel"),
+        "source": (f"device.hello(proto={ev.get('proto')}"
+                   + (f", fw={ev.get('fw')}" if ev.get("fw") else "") + ")"),
+    }
+
+
+def write_device_info(path: Path, ev: dict, cfg: dict) -> dict:
+    """device.hello → build/wechat/device.json(返回落盘内容,便于测试/调用方复用)。"""
+    info = build_device_info(ev, cfg)
+    _write_json(path, info)
+    return info
 
 
 def build_transport(cfg: dict):
@@ -80,6 +129,35 @@ def parse_device_status(text: str) -> dict:
         result["audio_drops"] = int(m.group(1))
         result["event_drops"] = int(m.group(2))
     return result
+
+
+def client_status_payload(cfg: dict) -> dict:
+    """设备屏幕"连接信息"行要的 PC 侧状态(主机名/虚拟声卡/麦克风切换)。"""
+    auto = bool(cfg.get("mic_auto_switch", True))
+    return {
+        "host": socket.gethostname()[:23],
+        "sink": str(cfg.get("audio_device") or "")[:23],
+        # 关闭自动切换时不报麦克风目标:设备据此显示 MIC AUTO OFF,
+        # 而不是显示一个"看起来切了、其实没切"的名字。
+        "mic": (str(cfg.get("mic_switch_target") or "")[:23] if auto else ""),
+        "auto": auto,
+    }
+
+
+async def client_status_loop(relay, cfg: dict, interval_s: float = 2.0) -> None:
+    """周期下发 bridge.status(设备端 6s 无心跳即视为 PC 离线)。
+
+    未连接时 send_client_status 返回 False 且不抛;这里继续下一轮,
+    设备重连后自动恢复,不需要重连逻辑配合。
+    """
+    payload = client_status_payload(cfg)
+    announced = False
+    while True:
+        if await relay.send_client_status(payload) and not announced:
+            announced = True
+            print(f"[status] 电脑端心跳已下发(bridge.status):PC={payload['host']} "
+                  f"声卡={payload['sink'] or '--'}")
+        await asyncio.sleep(interval_s)
 
 
 async def poll_device_status(transport, status: BridgeStatus) -> None:
@@ -153,12 +231,30 @@ async def run_bridge(cfg: dict, device_addr: str | None, dry_run: bool, status_f
     if mic_switcher.restore_leftover():
         print("[bridge] 已还原上次遗留的默认麦克风设置")
 
+    device_path = Path(status_path).parent / "device.json"
+
+    def on_device_info(ev: dict) -> None:
+        """device.hello → build/wechat/device.json(控制台"设备信息"面板数据源)。
+
+        设备上报 chip/flash/mac/fw/idf;档案补 model/display/audio/usb_vid_pid。
+        写盘失败只记日志:面板是辅助信息,不该影响语音主路径。
+        """
+        try:
+            info = write_device_info(device_path, ev, cfg)
+        except Exception as exc:      # noqa: BLE001
+            print(f"[bridge] 设备信息写盘失败: {exc}", file=sys.stderr)
+            return
+        status.update(device={"serial": info["mac"], "fw": info["fw"],
+                              "chip": info["mcu"], "channel": info["channel"]})
+        status.event("device", f"{info['mcu'] or '--'} fw={info['fw'] or '--'}")
+
     relay = Relay(
         transport=transport,
         asr_factory=make_session,
         inject_fn=lambda _text: None,
         key_action_fn=key_action,
         on_phase=phase,
+        on_device_info=on_device_info,
         timeout=float(cfg.get("session_timeout_s", 3.0)),
         connect_timeout_s=float(cfg.get("connect_timeout_s", 5.0)),
         do_inject=False,
@@ -174,6 +270,7 @@ async def run_bridge(cfg: dict, device_addr: str | None, dry_run: bool, status_f
         print("[bridge] dry-run: 不会写入真实虚拟声卡，也不会注入真实按键")
 
     status_task = asyncio.create_task(poll_device_status(transport, status))
+    status_push_task = asyncio.create_task(client_status_loop(relay, cfg))
     # connect_retries=0(默认)= 无限重试:设备没开机/出门了也不该让桥接退出,
     # 它回来就自动接上;要停就点控制台的"停止 Bridge"。
     attempts = int(cfg.get("connect_retries", 0))
@@ -201,6 +298,7 @@ async def run_bridge(cfg: dict, device_addr: str | None, dry_run: bool, status_f
             await asyncio.sleep(delay)
     finally:
         status_task.cancel()
+        status_push_task.cancel()
         if mic_switcher.available:
             mic_switcher.restore()          # 收尾兜底:别把用户的麦克风留在虚拟声卡
         status.update(phase="stopped", connected=False)
