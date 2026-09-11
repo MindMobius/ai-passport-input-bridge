@@ -80,6 +80,10 @@ USB 通道真人语音对照尚未跑过(此前链路测试 `audio_drops=0`)。
 另外,`companion/tests/` 有一批测试按 macOS 路径写的(`os.openpty`、`pytest-asyncio`),
 Windows 上会失败。
 
+## 硬件注意(实测)
+
+- **B&O Beoplay A1**:USB 音频的**采集通路恒为静音**(端点正常、播放正常、数据包准时但全零);它的**麦克风要用蓝牙(HFP)**才工作。详见 [docs/HARDWARE_NOTES.md](docs/HARDWARE_NOTES.md)。
+
 ## 命名与后续
 
 仓库名已经是通用的 `input-bridge`(任何自带语音输入的输入法/听写工具都能当目标),但内部模块名
