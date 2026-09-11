@@ -203,11 +203,18 @@ function renderChannelNote() {
       ? `USB 直连可用 · 自动识别 ${shortPath(usb.path)}${usb.in_use ? " · Bridge 已占用" : ""}`
       : "USB 未就绪：未发现 ESP32-C3 CDC 接口。",
     ble: ble.available
-      ? "蓝牙 radio 就绪，可切换 BLE 无线音频（拔掉 USB 前先切换通道）。"
+      ? "蓝牙 radio 就绪，可切 BLE 无线音频（无需插线；切换会重启 Bridge）。"
       : `蓝牙未就绪：${ble.reason || "Windows 未暴露 Bluetooth radio"}`,
     wifi: "WiFi 音频通道固件尚未实现（当前仅 USB/BLE 可用）。",
   };
-  $("channel-note").textContent = notes[selectedChannel] || "";
+  // 已选通道 ≠ Bridge 正在跑的通道 → 明确告诉用户下一步点哪个按钮,
+  // 否则"选了蓝牙但还在 USB 上跑"看起来就像切换没生效。
+  const activeChannel = state.status?.channel;
+  const pending = state.bridge?.running && activeChannel && activeChannel !== selectedChannel;
+  const suffix = pending
+    ? ` · 已选 ${selectedChannel.toUpperCase()}，点“保存并重连”生效（当前在跑 ${String(activeChannel).toUpperCase()}）`
+    : "";
+  $("channel-note").textContent = (notes[selectedChannel] || "") + suffix;
   $("channel-note").dataset.channel = selectedChannel;
 }
 
@@ -323,11 +330,23 @@ async function saveConfig() {
 
 $("local-address").textContent = location.host;
 
-$("channel-tabs").addEventListener("click", (e) => {
+$("channel-tabs").addEventListener("click", async (e) => {
   const b = e.target.closest("button[data-channel]");
   if (!b || b.disabled) return;
   selectedChannel = b.dataset.channel;
   document.querySelectorAll("#channel-tabs button").forEach((x) => x.classList.toggle("active", x === b));
+  renderChannelNote();
+  // 立刻落盘。通道选择以前只活在页面内存里,而 refresh() 每 2s 会用服务端配置
+  // 覆盖它 —— 用户点了"蓝牙",两秒后界面自己跳回 USB(2026-09-11 反馈),再点
+  // "保存并重连"重启的其实是 USB 桥接。落盘后刷新与选择就一致了。
+  try {
+    const cfg = { ...(state.config || {}), channel: selectedChannel };
+    await api("/api/config", { method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(cfg) });
+    state.config = cfg;
+  } catch (err) {
+    reportClient("error", `通道保存失败: ${err.message}`);
+  }
   renderChannelNote();
 });
 
