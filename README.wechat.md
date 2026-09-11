@@ -258,7 +258,16 @@ bridge process dies without dropping the link, the device flips back to
   writes; `BleakTransport` pairs automatically on connect (`_ensure_encrypted_link`).
 - The default recording device is switched to `CABLE Output` **only for the
   duration of a voice session** and restored right after (`mic_auto_switch`).
-- The firmware has not been flashed to a real Passport in this workspace.
+- Firmware is flashed and verified on a real Passport in this workspace (app
+  partition only — bootloader / partition table / NVS / `cardid` / `recovery`
+  are untouched; per-partition backups live in `build/wechat/backup/`).
+- Remaining BLE caveat: roughly 10–15% of ATT notifications are dropped inside
+  the Windows Bluetooth host stack (device reports `drops: audio 0`, every chunk
+  got a link-layer ack, yet the app sees fewer chunks). USB is the reliable
+  channel; ATT indications would be the fix and are **not implemented**.
+- `output_latency_s` (default 0.4s) trades audio delay for pipeline headroom —
+  with the old `latency="low"` each 100ms block blocked ~97ms, which is what
+  caused most in-session drops.
 - BLE audio quality is 16 kHz mono PCM; it is optimized for speech, not music.
 - Windows 10/11 only for the bridge UI/injection path.
 
@@ -269,5 +278,9 @@ bridge process dies without dropping the link, the device flips back to
 - `companion/keyinject_win.py` - Ctrl+Win / Ctrl+V / Enter injection
 - `companion/virtual_asr.py` - adapts audio frames to the existing relay
 - `companion/wechat_bridge_config.py` - configuration
+- `companion/bridge_status.py` - shared status JSON (dashboard reads it)
+- `companion/win_default_mic.py` - per-session default recorder switch/restore
+- `companion/relay.py` / `serial_transport.py` - BLE / USB transports + protocol
+- `companion/dashboard_server.py` + `dashboard/` - local console (127.0.0.1:8790)
 - `main/` - ESP-IDF firmware
 - `tests/` - upstream host tests
