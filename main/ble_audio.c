@@ -323,10 +323,16 @@ static int gap_event_handler(struct ble_gap_event *event, void *arg) {
                          desc.conn_itvl, (unsigned)(desc.conn_itvl * 5 / 4),
                          desc.conn_latency, desc.supervision_timeout);
             }
-            // 吞吐工程:2M PHY + 快连接间隔(15-30ms / latency 0);尽力而为,失败不致命
-            int rc = ble_gap_set_prefered_le_phy(s_conn, BLE_GAP_LE_PHY_2M_MASK,
-                                                 BLE_GAP_LE_PHY_2M_MASK, 0);
-            if (rc != 0) ESP_LOGW(TAG, "2M PHY 请求失败 %d", rc);
+            // 2M PHY:默认不请求。Qualcomm FastConnect 7800(本机适配器)上实测
+            // 会 1M↔2M 反复跳(tx_phy=2 后 ~2s 回到 1,再被拉回),并且每次
+            // 跳变附近丢一个通知:20 通知/s 下丢 ~4.7%(2026-09-11 对账:
+            // 设备发 71 块/142 片,PC 只收到 129 片,块丢 9.9%),与跳跃周期
+            // 吻合。1M + DLE 251 + 30ms 连接间隔对 8KB/s 的 ADPCM 仍有两倍
+            // 以上余量,稳定性优先。要复测 2M 就放开下面两行。
+            // int rc = ble_gap_set_prefered_le_phy(s_conn, BLE_GAP_LE_PHY_2M_MASK,
+            //                                      BLE_GAP_LE_PHY_2M_MASK, 0);
+            // if (rc != 0) ESP_LOGW(TAG, "2M PHY 请求失败 %d", rc);
+            int rc = 0;
             const struct ble_gap_upd_params upd = {
                 .itvl_min = 12,          // 15ms(1.25ms 单位)
                 .itvl_max = 24,          // 30ms
