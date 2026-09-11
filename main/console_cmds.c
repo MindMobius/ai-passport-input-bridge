@@ -166,8 +166,12 @@ static int cmd_time(int argc, char **argv)
     if (argc == 1) {
         char t[16];
         time_sync_format_local(t, sizeof(t));
-        out("time: %s (%s, tz %+d)\n", t,
-            time_sync_valid() ? "synced" : "unsynced", time_sync_tz_hour());
+        // 三态别混:unsynced = 从来没有时间;restored = 显示的是 NVS 里的
+        // 上次已知时间(复位/断电重启后,屏幕上是弱化灰);synced = 本次开机
+        // 电脑端校过时(屏幕正常白)。
+        const char *state = !time_sync_valid() ? "unsynced"
+                          : (time_sync_is_fresh() ? "synced" : "restored");
+        out("time: %s (%s, tz %+d)\n", t, state, time_sync_tz_hour());
         return 0;
     }
     if (argc == 3 && strcmp(argv[1], "set") == 0) {

@@ -17,6 +17,12 @@ esp_err_t nvs_settings_init(void);
 esp_err_t nvs_settings_get_tz_hour(int8_t *hour);
 esp_err_t nvs_settings_set_tz_hour(int8_t hour);
 
+// 最近一次已知的 wall-clock(UTC 秒;0 = 从未存过)。
+// 设备没有 RTC 电池:复位/断电即失时,靠它把"上次知道的时间"兜回来,
+// 电脑端下一次连接再校正(见 time_sync.c)。
+esp_err_t nvs_settings_get_last_epoch(int64_t *epoch);
+esp_err_t nvs_settings_set_last_epoch(int64_t epoch);
+
 void nvs_settings_factory_reset(void);   // 清 "app" 命名空间
 
 #ifdef __cplusplus

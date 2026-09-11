@@ -11,6 +11,7 @@ static const char *TAG = "settings";
 // 注:rf_mode 键已随双通道常开架构退役(2026-08-28,不再有互斥模式);旧键
 // 残留于 NVS 无读取方,无害(factory 清空可除)。
 static const char *K_TZ_HOUR   = "tz_hour";
+static const char *K_LAST_EPOCH = "last_epoch";
 
 esp_err_t nvs_settings_init(void) {
     nvs_handle_t h;
@@ -41,6 +42,32 @@ esp_err_t nvs_settings_set_tz_hour(int8_t hour) {
     if (e == ESP_OK) e = nvs_commit(h);
     nvs_close(h);
     ESP_LOGI(TAG, "tz_hour = %d", (int)hour);
+    return e;
+}
+
+// 最近一次已知时间(UTC 秒)。读失败/缺省一律回 0,调用方按"没有存档"处理。
+esp_err_t nvs_settings_get_last_epoch(int64_t *epoch) {
+    if (epoch) *epoch = 0;
+    nvs_handle_t h;
+    esp_err_t e = nvs_open(APP_NS, NVS_READONLY, &h);
+    if (e != ESP_OK) return ESP_OK;              // 命名空间还没建:当作没有存档
+    int64_t v = 0;
+    e = nvs_get_i64(h, K_LAST_EPOCH, &v);
+    nvs_close(h);
+    if (e == ESP_ERR_NVS_NOT_FOUND) return ESP_OK;
+    if (e != ESP_OK) return e;
+    if (epoch) *epoch = v;
+    return ESP_OK;
+}
+
+esp_err_t nvs_settings_set_last_epoch(int64_t epoch) {
+    if (epoch <= 0) return ESP_ERR_INVALID_ARG;
+    nvs_handle_t h;
+    esp_err_t e = nvs_open(APP_NS, NVS_READWRITE, &h);
+    if (e != ESP_OK) return e;
+    e = nvs_set_i64(h, K_LAST_EPOCH, epoch);
+    if (e == ESP_OK) e = nvs_commit(h);
+    nvs_close(h);
     return e;
 }
 

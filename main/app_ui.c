@@ -61,6 +61,7 @@ static page_t s_pages[APP_ST_COUNT];
 static app_stage_t s_cur_page = APP_ST_COUNT;
 static bool s_last_screen_on = true;
 static int  s_last_info_state = -1;   // 连接信息配色档(0=离线 1=仅链路 2=链路+PC)
+static int  s_last_time_fresh = -1;   // 时钟配色档(-1=未初始化)
 static lv_obj_t *s_bg;   // 基底屏:所有状态页都是它的子对象(单屏方案)
 
 static const char *const RISK_NAMES[APP_RISK_COUNT] = { "LOW RISK", "MEDIUM RISK", "HIGH RISK" };
@@ -458,6 +459,13 @@ void app_ui_render(const app_ui_snapshot_t *snap)
         char t[16];
         time_sync_format_local(t, sizeof(t));
         label_set_if_changed(s_time_label, t);
+    }
+    // 时钟配色:电脑端本次开机校过时 = 正常白;NVS 恢复的旧时间 = 弱化灰
+    // (设备无 RTC 电池,复位后先显示"上次已知时间",不自称准确)。
+    if ((int)snap->time_fresh != s_last_time_fresh) {
+        lv_obj_set_style_text_color(s_time_label,
+                                    lv_color_hex(snap->time_fresh ? UI_TEXT : UI_DIM), 0);
+        s_last_time_fresh = snap->time_fresh;
     }
 
     // 横幅互斥:OFFLINE(通道断线)> BUSY(同位置 BANNER_Y)

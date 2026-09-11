@@ -173,6 +173,10 @@ static bool s_ui_panel_on  = true;       // 上次渲染时的面板供电状态
 static int s_batt_soc = -1;              // 电量缓存(至多 1s 读一次真实 I2C,见渲染路径)
 static uint64_t s_batt_last_ms = (uint64_t)-1000;   // 上次电量读取时刻(负初值:首帧立即读)
 static uint64_t s_last_render_ms = 0;    // 上次渲染时刻(S1 降频:非计时状态 ≥1s 兜底;初值 0 → 首帧立即渲染)
+static uint64_t s_time_persist_ms = 0;   // 上次时钟落盘时刻(每 10 分钟一次,见下)
+// 时钟兜底落盘周期:设备无 RTC 电池,复位后只能恢复到"最后一次落盘时间"。
+// 10 分钟 = 复位后最多慢 10 分钟(电脑端一连上就校正),NVS 写入量约 144 次/天。
+#define TIME_PERSIST_INTERVAL_MS 600000u
 
 // 事件排空批上限:每 16 条让出 2ms,防洪峰饿死低优先级投递方(F2)
 #define APP_EVENT_BATCH_MAX 16
@@ -422,6 +426,12 @@ static void app_task(void *arg)
             tick_acted = (n > 0);      // TICK 产生动作(toast 过期/超时/息屏) → 需渲染
             next_tick = now_ms + APP_TICK_MS;
             pm_idle_gate_check(now_ms);   // 满 1 分钟无事件才放手省电
+            // 时钟兜底落盘(10 分钟一次):复位后顶栏至少能显示上次知道的时间,
+            // 不用等电脑端连上才不是 "--:--"。
+            if (now_ms - s_time_persist_ms >= TIME_PERSIST_INTERVAL_MS) {
+                s_time_persist_ms = now_ms;
+                time_sync_persist();
+            }
         }
 
         // 渲染判定(S1 降频):有事件/动作、或距上次渲染 ≥1s(顶栏/电量/
@@ -465,6 +475,7 @@ static void app_task(void *arg)
                     snap.mtu = ble_audio_mtu();
                     snap.audio_drops = ble_audio_audio_drops();
                     snap.event_drops = ble_audio_event_drops();
+                    snap.time_fresh = time_sync_is_fresh();   // false → 时钟是 NVS 恢复的旧值,UI 弱化
                     app_ui_render(&snap);
                     s_ui_screen_on = snap.screen_on;
                 }
@@ -555,6 +566,10 @@ void app_main(void)
         return;
     }
     nvs_settings_init();
+    // 时区 + 上次已知时间(NVS)。放在这里的原因:USB 口一关就复位设备
+    // (USB-Serial-JTAG 固有行为,实测),而设备没有 RTC 电池 —— 没有这步,
+    // 桥接每停一次顶栏就空成 "--:--",直到电脑端再次连上。
+    time_sync_init();
 
     // 2. BSP:总线 + 显示(失败则无法继续 —— UI 是唯一出口)
     // 这里(以及上面 NVS)的 return 是有意的"停在原地", 不是漏了错误处理

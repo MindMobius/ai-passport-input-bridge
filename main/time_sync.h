@@ -13,9 +13,16 @@
 
 #include "esp_err.h"
 
-esp_err_t time_sync_init(void);                // 读 NVS 时区(缺省 +8);校时状态=未校时
-void time_sync_set_epoch(int64_t epoch_sec);   // 校时(UTC 秒);置 valid + 同步系统时间
-bool time_sync_valid(void);                    // 是否已校时(UI "--:--" 判定)
+// 读 NVS:时区(缺省 +8)+ 最近一次已知时间。存档存在时直接起用(但仍标记为
+// "非本次校时"),没有存档就是未校时("--:--")。
+esp_err_t time_sync_init(void);
+void time_sync_set_epoch(int64_t epoch_sec);   // 电脑端校时(UTC 秒);置 valid + fresh + 同步系统时间
+bool time_sync_valid(void);                    // 是否有可用时间(UI "--:--" 判定)
+// 本次开机是否被电脑端校过时。false = 当前显示的是 NVS 恢复的旧时间(UI 弱化),
+// 用来区分"准点"和"上次知道的时间"。
+bool time_sync_is_fresh(void);
+// 把当前 wall-clock 落 NVS(主循环周期调用;设备无 RTC 电池,复位即靠它兜底)
+void time_sync_persist(void);
 int time_sync_tz_hour(void);                   // 当前时区偏移小时(默认 8)
 esp_err_t time_sync_set_tz(int hour);          // 设置时区偏移(±12 校验,NVS 持久化)
 int time_sync_format_local(char *buf, size_t cap); // "HH:MM"(校时)或 "--:--"(未校时)

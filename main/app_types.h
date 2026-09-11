@@ -234,6 +234,7 @@ typedef struct {
     uint16_t       mtu;                         // BLE 协商 MTU(0 = 无连接)
     uint32_t       audio_drops;                 // BLE 音频帧丢弃累计
     uint32_t       event_drops;                 // BLE 事件行丢弃累计
+    bool           time_fresh;                  // 时钟本次开机已被电脑端校过(false = NVS 恢复的旧值)
 } app_ui_snapshot_t;
 
 // ---------------- 超时常量 ----------------
