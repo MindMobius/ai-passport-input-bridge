@@ -25,5 +25,6 @@
   "mic_auto_switch": true,
   "mic_switch_target": "CABLE Output",
   "device_beep": "soft",
-  "device_screen_off_s": 120
+  "device_screen_off_s": 120,
+  "output_latency_s": 0.4
 }

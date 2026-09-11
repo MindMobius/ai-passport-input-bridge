@@ -8,7 +8,8 @@ const fields = [
   "usb_port", "device_name", "audio_device", "target_title_regex",
   "voice_hotkey", "voice_stop_key", "paste_hotkey", "enter_hotkey",
   "clear_hotkey", "cancel_hotkey",
-  "input_sample_rate", "output_sample_rate", "output_channels", "session_timeout_s",
+  "input_sample_rate", "output_sample_rate", "output_channels", "output_latency_s",
+  "session_timeout_s",
   "device_beep", "device_screen_off_s"
 ];
 const checks = ["require_target_for_paste", "require_target_for_enter"];

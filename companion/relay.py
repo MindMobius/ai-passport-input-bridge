@@ -463,6 +463,7 @@ class Relay:
         self._approval_task = None  # 审批演示后台任务
         self._time_task = None      # 每小时校时后台任务
         self._device_drop = None    # 最近 status 帧的设备掉帧数
+        self._device_blocks = None  # 最近 status 帧的设备已发块数(双端对账的分母)
         self.session_stats = []     # 每个 voice 会话的掉帧统计(AC3 对账)
         self._ble_chunk_lens = {}   # BLE chunk 长度分布(取证: CoreBluetooth 合并检测)
         self.decisions = []         # 收到的 agent.action 列表
@@ -670,7 +671,10 @@ class Relay:
             except asyncio.QueueFull:
                 # 有界上限:ASR 卡住时丢音频帧(可容忍,会话级掉帧统计兜底)
                 self._dropped_audio += 1
-                if self._dropped_audio % 100 == 1:
+                sess = self._session
+                if sess is not None:      # 会话级计数:收尾统计里能直接看到"谁丢的"
+                    sess.q_drops = getattr(sess, "q_drops", 0) + 1
+                if self._dropped_audio % 10 == 1:
                     print(f"[relay] 音频队列满,丢弃 1 帧"
                           f"(累计 {self._dropped_audio})", file=sys.stderr)
         else:
@@ -716,6 +720,9 @@ class Relay:
                 n = len(chunk)
                 self._ble_chunk_lens[n] = self._ble_chunk_lens.get(n, 0) + 1
                 adpcm_state, frames = reassemble_adpcm(adpcm_state, chunk)
+                if s is not None:   # 会话级取证:重组缺块数(区分"没到"还是"到了拼不齐")
+                    s.adpcm_miss = adpcm_state.get("miss", 0)
+                    s.ble_chunks = getattr(s, "ble_chunks", 0) + 1
             else:
                 pcm_buf, frames = reassemble_audio(pcm_buf, chunk)
             for fr in frames:
@@ -759,9 +766,11 @@ class Relay:
         elif etype == "status":
             # voice.end 后设备补发的会话对账帧: 挂到上一个完成的会话
             self._device_drop = ev.get("drop")
+            self._device_blocks = ev.get("blocks")
             if self.session_stats:
                 self.session_stats[-1]["device_drop"] = self._device_drop
-            print(f"[event] status drop={self._device_drop}")
+                self.session_stats[-1]["device_blocks"] = self._device_blocks
+            print(f"[event] status drop={self._device_drop} blocks={self._device_blocks}")
         elif etype == "agent.action":
             self.decisions.append(ev)
             # 内存有界:与 session_stats 同款截断(每会话至多 1 条,100 条足够复盘)
@@ -1022,9 +1031,17 @@ class Relay:
     @staticmethod
     def print_stats(s):
         """打印会话掉帧统计(AC3 对账)。"""
-        dev = (f"  设备掉帧 {s['device_drop']}"
-               if s.get("device_drop") is not None else "")
-        print(f"[voice] 会话 {s['duration']:.2f}s: 理论帧 {s['theory_frames']} "
+        parts = []
+        if s.get("device_blocks") is not None:
+            parts.append(f"设备发 {s['device_blocks']}")
+        if s.get("device_drop") is not None:
+            parts.append(f"设备丢 {s['device_drop']}")
+        if s.get("adpcm_miss"):
+            parts.append(f"重组缺块 {s['adpcm_miss']}")
+        if s.get("q_drops"):
+            parts.append(f"队列丢 {s['q_drops']}")
+        dev = ("  " + " / ".join(parts)) if parts else ""
+        print(f"[voice] 会话 {s['duration']:.2f}s: 理论上限 {s['theory_frames']} "
               f"实收 {s['rx_frames']} 差 {s['missed']} "
               f"({s['drop_pct']:.1f}%){dev}")
         if s["final_text"]:
@@ -1061,6 +1078,9 @@ class _VoiceSession:
         self.start_mono = time.monotonic()
         self.end_mono = None
         self.rx_frames = 0                  # 帧数(100ms 节拍, 两种格式一致)
+        self.adpcm_miss = 0                 # 本次会话 BLE 重组里"拼不齐"的块数
+        self.ble_chunks = 0                 # 本次会话收到的 BLE 分片数
+        self.q_drops = 0                    # 本次会话里音频队列满导致的丢弃
         self.final_text = ""
         self._connected = asyncio.Event()   # ASR 连接就绪
         self._conn_error = None             # 连接失败异常(非 None 后 feed 抛错)
@@ -1274,6 +1294,8 @@ class _VoiceSession:
         return {"duration": dur, "theory_frames": theory,
                 "rx_frames": self.rx_frames, "missed": missed,
                 "drop_pct": pct, "device_drop": None,
+                "adpcm_miss": self.adpcm_miss,
+                "q_drops": self.q_drops,
                 "final_text": self.final_text}
 
 

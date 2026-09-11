@@ -120,6 +120,11 @@ class VirtualMicSink:
         self.input_sample_rate = int(config.get("input_sample_rate", 16000))
         self.requested_output_rate = config.get("output_sample_rate")
         self.requested_channels = config.get("output_channels")
+        # 输出缓冲(秒)。留小 = 每次 write 都要等声卡把缓冲放空(实测 100ms
+        # 的块要阻塞 ~97ms,消费端几乎跑不过实时 → 队列积压丢帧);留大 =
+        # write 立刻返回,消费端有充足余量。代价是音频延迟增加,对"输入法
+        # 转写"这种离线消费无感。会话收尾时按同一值等待排空再停流。
+        self.latency_s = min(2.0, max(0.05, float(config.get("output_latency_s", 0.4))))
         self._stream: Any = None
         self._device: dict[str, Any] | None = None
         self._samplerate = 0
@@ -213,7 +218,7 @@ class VirtualMicSink:
                     samplerate=sr,
                     channels=channels,
                     dtype="int16",
-                    latency="low",
+                    latency=self.latency_s,
                 )
                 stream.start()
             except Exception as exc:  # PortAudio errors have varied classes
@@ -226,7 +231,8 @@ class VirtualMicSink:
             self._channels = channels
             print(
                 f"[mic] 已打开虚拟麦克风输出: {dev.get('name')} "
-                f"index={dev['index']} {sr}Hz {channels}ch"
+                f"index={dev['index']} {sr}Hz {channels}ch "
+                f"缓冲={self.latency_s*1000:.0f}ms"
             )
 
     def write(self, pcm: bytes) -> None:
@@ -247,7 +253,9 @@ class VirtualMicSink:
     def finish(self) -> None:
         # Let the audio engine consume the final block before stopping.
         if self._stream is not None:
-            time.sleep(0.12)
+            # 必须等缓冲区排空再停流:缓冲开着的时候,最后一块可能还在声卡里,
+            # 停早了会把尾音掐掉(IME 随后收到的 stop 键就定稿了)。
+            time.sleep(self.latency_s + 0.15)
             with contextlib.suppress(Exception):
                 self._stream.stop()
 

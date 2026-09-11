@@ -20,6 +20,9 @@ DEFAULTS: dict[str, Any] = {
     "input_sample_rate": 16000,
     "output_sample_rate": None,    # None = use device default, normally 48000
     "output_channels": None,       # None = use up to 2 channels
+    # 虚拟声卡输出缓冲(秒)。太小会让每次写入阻塞到接近实时(消费不过来的
+    # 直接后果是会话内丢帧);0.2~0.5 是实测稳妥区间。
+    "output_latency_s": 0.4,
     # Keyboard actions
     "voice_hotkey": "ctrl+win+shift",  # WeChat IME voice start
     "voice_stop_key": "shift",       # any-key stop for WeChat voice input
@@ -71,6 +74,9 @@ def _validate(cfg: dict[str, Any]) -> None:
         raise ValueError("output_sample_rate 必须大于 0")
     if cfg.get("output_channels") is not None and int(cfg["output_channels"]) <= 0:
         raise ValueError("output_channels 必须大于 0")
+    lat = float(cfg.get("output_latency_s", 0.4))
+    if lat < 0.05 or lat > 2.0:
+        raise ValueError("output_latency_s 必须在 0.05..2.0 秒之间")
     if str(cfg.get("device_beep", "soft")) not in ("off", "soft", "full"):
         raise ValueError("device_beep 必须是 'off' / 'soft' / 'full'")
     screen_s = int(cfg.get("device_screen_off_s", 120))
