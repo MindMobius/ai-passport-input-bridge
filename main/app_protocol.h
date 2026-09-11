@@ -43,8 +43,11 @@ size_t app_protocol_key_action(char *buf, size_t cap, app_key_action_t action);
 // decision: app_approval_decision_t (approve/reject/details)
 size_t app_protocol_agent_action(char *buf, size_t cap, const char *task_id,
                                  uint8_t decision);
-// voice.end 后补发的会话对账帧: {"event":"status","drop":n}(掉帧对账,见 design.md)
-size_t app_protocol_device_status(char *buf, size_t cap, uint32_t drop_count);
+// voice.end 后补发的会话对账帧: {"event":"status","drop":n,"blocks":m}
+// drop = 本会话丢弃块数(采集环/发送),blocks = 成功上链路的块数 —— 后者让
+// PC 侧能把"我收到多少"与"设备发了多少"直接相减,不再用会话时长推算。
+size_t app_protocol_device_status(char *buf, size_t cap, uint32_t drop_count,
+                                  uint32_t blocks_sent);
 
 #ifdef __cplusplus
 }

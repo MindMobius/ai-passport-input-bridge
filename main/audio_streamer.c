@@ -72,6 +72,7 @@ static bool s_drop_active = false;           // 共享丢帧标志:采集/发送
 // 用临界区保护(微秒级,不阻塞实时性)。
 static portMUX_TYPE s_drop_mux = portMUX_INITIALIZER_UNLOCKED;
 static uint32_t s_drop_count = 0;            // 本会话丢帧计数(start 清零;voice.end 后取走上报)
+static uint32_t s_sent_count = 0;            // 本会话成功上链路的块数(同口径,用于双端对账)
 
 // 发送失败日志限频:拥塞时(无订阅/流控超时)每帧刷 Warning 会反向加重负载。
 // 首帧立即打,之后每秒聚合一条(帧数 = 该 1s 窗口内丢弃数,累计统计走 s_drop_count)。
@@ -258,6 +259,7 @@ esp_err_t audio_streamer_start(void) {
     s_peak = 0;
     s_drop_active = false;
     s_drop_count = 0;
+    s_sent_count = 0;
     // ADPCM 自适应复位由 ble_worker 消费(token 变化检测,不在本任务碰编码
     // 状态):新会话首块前复位,不携带上一会话的静音/噪声自适应。
     xSemaphoreGive(s_sem);
@@ -305,6 +307,14 @@ uint32_t audio_streamer_take_drops(void) {
     s_drop_count = 0;
     portEXIT_CRITICAL(&s_drop_mux);
     return d;
+}
+
+uint32_t audio_streamer_take_sent(void) {
+    portENTER_CRITICAL(&s_drop_mux);
+    uint32_t v = s_sent_count;
+    s_sent_count = 0;
+    portEXIT_CRITICAL(&s_drop_mux);
+    return v;
 }
 
 // 等环空(最多 ms 毫秒),用于 voice.end 前的帧序保证。
@@ -419,6 +429,7 @@ static void ble_worker(void *arg) {
         vRingbufferReturnItem(s_ring, item);
         ring_item_returned();
         if (rc == 0) {
+            s_sent_count++;   // 成功上链路一块(双端对账的分母)
             // 发送恢复且环已有余量(不再积压)才解除 BLE BUSY——
             // 只靠发送成功不够:若发送慢但一直成功,环满造成的丢帧永远不会被解除
             if (s_drop_active && ring_items() < RING_SLOTS) {

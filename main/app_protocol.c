@@ -252,10 +252,12 @@ size_t app_protocol_voice_end(char *buf, size_t cap) {
     return n;
 }
 
-size_t app_protocol_device_status(char *buf, size_t cap, uint32_t drop_count) {
+size_t app_protocol_device_status(char *buf, size_t cap, uint32_t drop_count,
+                                  uint32_t blocks_sent) {
     cJSON *o = cJSON_CreateObject();
     cJSON_AddStringToObject(o, "event", "status");
     cJSON_AddNumberToObject(o, "drop", (double)drop_count);
+    cJSON_AddNumberToObject(o, "blocks", (double)blocks_sent);
     size_t n = serialize(o, buf, cap);
     cJSON_Delete(o);
     return n;

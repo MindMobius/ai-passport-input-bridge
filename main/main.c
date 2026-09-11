@@ -229,9 +229,10 @@ static void run_actions(const app_action_t *acts, uint8_t n)
             // 此刻取走才是本会话完整计数(此前取会漏掉 worker 最后一次丢帧)。
             audio_streamer_drain(500);
             s_last_drop_count = audio_streamer_take_drops();
+            const uint32_t sent_blocks = audio_streamer_take_sent();
             len = app_protocol_voice_end(buf, sizeof(buf));
             send_event_line_important(buf, len);   // 会话边界帧:不丢(审查 P2)
-            len = app_protocol_device_status(buf, sizeof(buf), s_last_drop_count);
+            len = app_protocol_device_status(buf, sizeof(buf), s_last_drop_count, sent_blocks);
             send_event_line(buf, len);             // 对账帧:尽力而为即可
             break;
         case APP_ACT_SEND_KEY_ACTION:

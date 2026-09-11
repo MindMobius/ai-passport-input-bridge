@@ -382,8 +382,19 @@ static int gap_event_handler(struct ble_gap_event *event, void *arg) {
         break;
 
     case BLE_GAP_EVENT_CONN_UPDATE:
-        // 吞吐诊断:参数更新请求的最终结果(成功/被拒)
+        // 吞吐诊断:参数更新请求的最终结果(成功/被拒)+ 生效后的真实间隔。
+        // 间隔直接决定吞吐上限:逐片流控下"一个连接事件能走几片"就是瓶颈,
+        // 所以这里必须打印生效值,而不是只看请求值(2026-09-11:请求 15-30ms,
+        // 实际拿到 60ms;配合 PHY/DLE 抖动一起造成了 BLE 丢帧)。
         ESP_LOGI(TAG, "连接参数更新结果: status=%d", event->conn_update.status);
+        {
+            struct ble_gap_conn_desc desc;
+            if (s_conn != 0xFFFF && ble_gap_conn_find(s_conn, &desc) == 0) {
+                ESP_LOGI(TAG, "生效连接间隔: itvl=%u(%ums) latency=%u timeout=%u",
+                         desc.conn_itvl, (unsigned)(desc.conn_itvl * 5 / 4),
+                         desc.conn_latency, desc.supervision_timeout);
+            }
+        }
         break;
 
     case BLE_GAP_EVENT_DATA_LEN_CHG:

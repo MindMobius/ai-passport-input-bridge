@@ -47,6 +47,11 @@ uint16_t audio_streamer_peak(void);    // 最近一块的峰值采样(UI 音量�
 // 取走(采集已停 + 环已排空,计数稳定),随 voice.end 后的 status 帧上报 Mac(掉帧对账)。
 uint32_t audio_streamer_take_drops(void);
 
+// 取走"本会话成功上链路的块数"并清零(voice.end 的 status 帧据此与 PC 侧
+// 实收帧数对账:设备发了 N 块、PC 收到 M 块,差额才是真正的链路/接收端丢失,
+// 不再依赖"会话时长推算"这种含非音频时段的口径)。必须在 drain 之后取。
+uint32_t audio_streamer_take_sent(void);
+
 #ifdef __cplusplus
 }
 #endif
