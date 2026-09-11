@@ -1,0 +1,171 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>AI Passport // Control</title>
+  <link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+  <div class="app-shell">
+    <aside class="sidebar">
+      <div class="brand">
+        <div class="brand-mark">AP</div>
+        <div>
+          <strong>AI PASSPORT</strong>
+          <span>CONTROL / 01</span>
+        </div>
+      </div>
+      <nav class="nav">
+        <a class="nav-item active" href="#connection"><span>01</span>连接配置</a>
+        <a class="nav-item" href="#parameters"><span>02</span>参数调整</a>
+        <a class="nav-item" href="#status"><span>03</span>状态监控</a>
+        <a class="nav-item" href="#keymap"><span>04</span>按键映射</a>
+        <a class="nav-item" href="#logs"><span>05</span>运行日志</a>
+      </nav>
+      <div class="sidebar-foot">
+        <span class="tiny-label">LOCAL CONSOLE</span>
+        <strong id="local-address">127.0.0.1</strong>
+        <span class="muted">FOLOTOY / WECHAT IME BRIDGE</span>
+        <span class="muted" id="sidebar-state">--</span>
+      </div>
+    </aside>
+
+    <main class="main">
+      <header class="topbar">
+        <div>
+          <span class="eyebrow">DEVICE CONTROL / LOCAL</span>
+          <h1>AI Passport 控制台</h1>
+        </div>
+        <div class="top-status">
+          <div class="status-pill" id="bridge-pill"><i class="dot"></i><span>CHECKING</span></div>
+          <div class="status-meta"><span>TRANSPORT</span><strong id="top-transport">--</strong></div>
+          <div class="status-meta"><span>BATTERY</span><strong id="top-battery">--</strong></div>
+          <div class="status-meta"><span>UPDATED</span><strong id="top-updated">--:--:--</strong></div>
+        </div>
+      </header>
+
+      <section class="grid">
+        <article class="panel span-7" id="connection">
+          <div class="panel-head">
+            <div><span class="eyebrow">01 / CONNECTION</span><h2>连接配置</h2></div>
+            <div class="panel-index">LINK</div>
+          </div>
+          <div class="segmented" id="channel-tabs">
+            <button data-channel="usb">USB</button>
+            <button data-channel="ble">蓝牙 BLE</button>
+            <button data-channel="wifi" disabled>WiFi <small>未实现</small></button>
+          </div>
+          <p class="channel-note" id="channel-note">正在读取通道状态…</p>
+          <div class="form-grid two">
+            <label class="field">
+              <span>设备路径 / DEVICE PATH</span>
+              <input id="usb_port" placeholder="自动发现 ESP32-C3 CDC 接口">
+            </label>
+            <label class="field">
+              <span>设备名称 / DEVICE NAME</span>
+              <input id="device_name" placeholder="AI Passport">
+            </label>
+          </div>
+          <div class="device-line">
+            <div><span class="tiny-label">USB</span><strong id="usb-device">检测中...</strong></div>
+            <div><span class="tiny-label">BLE</span><strong id="ble-device">检测中...</strong></div>
+          </div>
+          <div class="action-row">
+            <button class="btn primary" id="btn-apply">保存并重连</button>
+            <button class="btn" id="btn-stop">停止 Bridge</button>
+            <button class="btn" id="btn-test-mic">测试虚拟麦克风</button>
+          </div>
+          <pre class="terminal compact" id="test-output">等待操作...</pre>
+        </article>
+
+        <article class="panel span-5" id="status">
+          <div class="panel-head">
+            <div><span class="eyebrow">03 / STATUS</span><h2>状态监控</h2></div>
+            <div class="panel-index">LIVE</div>
+          </div>
+          <div class="metric-grid">
+            <div class="metric"><span>连接</span><strong id="metric-connected">--</strong></div>
+            <div class="metric"><span>电池</span><strong id="metric-battery">--</strong></div>
+            <div class="metric"><span>链路</span><strong id="detail-link">--</strong></div>
+            <div class="metric"><span>音频流</span><strong id="metric-stream">--</strong></div>
+            <div class="metric"><span>丢帧</span><strong id="metric-drops">--</strong></div>
+            <div class="metric"><span>语音状态</span><strong id="metric-voice">--</strong></div>
+            <div class="metric"><span>最后按键</span><strong id="metric-key">--</strong></div>
+            <div class="metric"><span>虚拟声卡</span><strong id="metric-audio">--</strong></div>
+          </div>
+          <div class="status-detail">
+            <div><span class="tiny-label">CHANNEL</span><strong id="detail-channel">--</strong></div>
+            <div><span class="tiny-label">PID</span><strong id="detail-pid">--</strong></div>
+          </div>
+          <div class="event-list" id="event-list"><div class="empty">暂无事件</div></div>
+        </article>
+
+        <article class="panel span-7" id="parameters">
+          <div class="panel-head">
+            <div><span class="eyebrow">02 / PARAMETERS</span><h2>参数调整</h2></div>
+            <div class="panel-index">CONFIG</div>
+          </div>
+          <div class="form-grid two">
+            <label class="field"><span>虚拟麦克风 / AUDIO DEVICE</span><input id="audio_device" list="audio-device-list"></label>
+            <label class="field"><span>目标窗口 / TARGET REGEX</span><input id="target_title_regex"></label>
+            <label class="field"><span>启动语音 / VOICE HOTKEY</span><input id="voice_hotkey"></label>
+            <label class="field"><span>结束语音 / STOP KEY</span><input id="voice_stop_key"></label>
+            <label class="field"><span>粘贴 / PASTE HOTKEY</span><input id="paste_hotkey"></label>
+            <label class="field"><span>发送 / ENTER HOTKEY</span><input id="enter_hotkey"></label>
+            <label class="field"><span>清空 / CLEAR HOTKEY</span><input id="clear_hotkey"></label>
+            <label class="field"><span>取消 / CANCEL HOTKEY</span><input id="cancel_hotkey"></label>
+            <label class="field"><span>输入采样率</span><input id="input_sample_rate" type="number"></label>
+            <label class="field"><span>输出采样率</span><input id="output_sample_rate" type="number"></label>
+            <label class="field"><span>输出声道</span><input id="output_channels" type="number"></label>
+            <label class="field"><span>会话超时 / SEC</span><input id="session_timeout_s" type="number" step="0.1"></label>
+          </div>
+          <datalist id="audio-device-list"></datalist>
+          <div class="toggle-row">
+            <label class="check"><input type="checkbox" id="require_target_for_paste"><span>粘贴前检查目标窗口</span></label>
+            <label class="check"><input type="checkbox" id="require_target_for_enter"><span>回车前检查目标窗口</span></label>
+          </div>
+          <div class="action-row">
+            <button class="btn primary" id="btn-save">保存参数</button>
+            <span class="muted" id="config-path"></span>
+          </div>
+        </article>
+
+        <article class="panel span-5">
+          <div class="panel-head">
+            <div><span class="eyebrow">DEVICE / INFO</span><h2>设备信息</h2></div>
+            <div class="panel-index">ID</div>
+          </div>
+          <div class="info-list">
+            <div><span>设备型号</span><strong id="dev-model">--</strong></div>
+            <div><span>MCU</span><strong id="dev-mcu">--</strong></div>
+            <div><span>Flash</span><strong id="dev-flash">--</strong></div>
+            <div><span>显示</span><strong id="dev-display">--</strong></div>
+            <div><span>音频</span><strong id="dev-audio">--</strong></div>
+            <div><span>序列号 (MAC)</span><strong id="device-serial">--</strong></div>
+            <div><span>USB ID</span><strong id="dev-usb-id">--</strong></div>
+          </div>
+          <p class="channel-note" id="device-source"></p>
+        </article>
+
+        <article class="panel span-12" id="keymap">
+          <div class="panel-head">
+            <div><span class="eyebrow">04 / KEYMAP</span><h2>按键映射</h2></div>
+            <div class="panel-index">INPUT</div>
+          </div>
+          <div class="keymap" id="keymap-grid"></div>
+        </article>
+
+        <article class="panel span-12" id="logs">
+          <div class="panel-head">
+            <div><span class="eyebrow">05 / LOG STREAM</span><h2>运行日志</h2></div>
+            <div class="log-tabs"><button class="active" data-log="stdout">STDOUT</button><button data-log="stderr">STDERR</button></div>
+          </div>
+          <pre class="terminal" id="log-output">等待 Bridge 日志...</pre>
+        </article>
+      </section>
+    </main>
+  </div>
+  <script src="/app.js"></script>
+</body>
+</html>

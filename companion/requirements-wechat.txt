@@ -1,0 +1,18 @@
+# -*- coding: utf-8 -*-
+# AI Passport -> 微信输入法桥接:Windows 运行依赖(新电脑只需装这一份)
+#
+#   install.cmd 会自动: python -m venv .venv && pip install -r companion\requirements-wechat.txt
+#
+# 通道
+bleak==3.0.2          # BLE 通道(winrt 后端;Win10 1803+)
+pyserial>=3.5         # USB 通道(ESP32-C3 USB-Serial-JTAG)
+# 音频
+sounddevice>=0.5.1    # 写虚拟声卡(VB-CABLE)
+# 注入 / 系统集成
+pywin32>=306          # Ctrl+Win+Shift / Ctrl+V / Enter 注入 + 剪贴板
+comtypes>=1.4         # IPolicyConfig:会话内临时切默认麦克风(用完还原)
+pycaw>=20240210       # Core Audio 端点枚举(CABLE Output 定位)
+psutil>=5.9           # 本地控制台启停 Bridge 进程
+# 固件侧工具(可选但默认装上:verify/flash 用)
+esptool>=4.8
+pytest>=8
