@@ -23,7 +23,7 @@ HERE = Path(__file__).resolve().parent
 if str(HERE) not in sys.path:
     sys.path.insert(0, str(HERE))
 
-from bridge_status import BridgeStatus
+from bridge_status import BridgeStatus, write_json_atomic
 from keyinject_win import KeyInjectError, WindowsKeyInjector
 from relay import BleakTransport, Relay, RelayError
 from virtual_asr import VirtualMicSession
@@ -45,10 +45,7 @@ DEVICE_PROFILE = {
 
 def _write_json(path: Path, obj: dict) -> None:
     """原子写(临时文件 + replace):控制台随时在读,不能读到半个 JSON。"""
-    path.parent.mkdir(parents=True, exist_ok=True)
-    tmp = path.with_suffix(path.suffix + ".tmp")
-    tmp.write_text(json.dumps(obj, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
-    tmp.replace(path)
+    write_json_atomic(path, obj)
 
 
 def build_device_info(ev: dict, cfg: dict) -> dict:
