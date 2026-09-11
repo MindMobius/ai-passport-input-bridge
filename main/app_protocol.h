@@ -13,6 +13,16 @@ extern "C" {
 #define APP_PROTO_TX_CAP 512   // 序列化缓冲上限
 #define APP_PROTO_RX_CAP 2048  // 解析行上限
 
+// 设备身份(device.hello 扩展字段)。纯数据:填充发生在 IDF 侧 dev_info.c,
+// 协议层只负责序列化 —— app_protocol.c 保持零 IDF 依赖(宿主机可测)。
+typedef struct {
+    char fw[32];       // 固件版本(esp_app_desc.version 同宽,不做有损截断)
+    char idf[20];      // 构建所用 IDF 版本
+    char chip[24];     // 芯片型号 + revision(如 "ESP32-C3 r3")
+    int  flash_mb;     // flash 容量(MB;0 = 未知)
+    char mac[18];      // 基础 MAC("4C:11:AE:32:F1:48";空 = 未知)
+} app_dev_info_t;
+
 // 解析 Mac→设备 的 JSON 行。成功填 ev 并返回 true;未知 type / 畸形 / 非法字段 → false。
 bool app_protocol_parse(const char *json, size_t len, app_event_t *ev);
 
@@ -23,7 +33,9 @@ bool app_protocol_parse(const char *json, size_t len, app_event_t *ev);
 void app_protocol_dispatch_event(const app_event_t *ev);
 
 // 设备→Mac 序列化。返回写入字节数(不含 NUL);失败返回 0。
-size_t app_protocol_device_hello(char *buf, size_t cap, int proto);
+// info 为 NULL 时只发 proto(兼容旧字段集:PC 侧按缺字段容错)。
+size_t app_protocol_device_hello(char *buf, size_t cap, int proto,
+                                 const app_dev_info_t *info);
 size_t app_protocol_voice_start(char *buf, size_t cap, const char *audio_format);
 size_t app_protocol_voice_end(char *buf, size_t cap);
 // 上行按键动作(enter/clear,PC client 执行注入;见 key-remap 任务)

@@ -9,6 +9,16 @@ BUILD_SRC="${BUILD_SRC:-$HOME/codex-build/passport-wechat-bridge-$(date +%Y%m%d-
 BUILD_DIR="${BUILD_DIR:-$BUILD_SRC/build-wechat}"
 OUT_DIR="$PROJECT_DIR/build/wechat"
 
+# 默认目录不存在时自动挑一个可用的 ESP-IDF(换机器/换克隆目录名都不用改脚本)
+if [[ ! -f "$IDF_DIR/export.sh" ]]; then
+  for cand in "$HOME"/esp/esp-idf-*/export.sh; do
+    [[ -f "$cand" ]] || continue
+    IDF_DIR="$(dirname "$cand")"
+    echo "[build] 默认目录不存在,自动选用 $IDF_DIR"
+    break
+  done
+fi
+
 if [[ ! -f "$IDF_DIR/export.sh" ]]; then
   echo "ERROR: ESP-IDF not found at $IDF_DIR" >&2
   exit 2
@@ -29,6 +39,14 @@ cd "$BUILD_SRC"
 # shellcheck disable=SC1090
 source "$IDF_DIR/export.sh"
 
+# 固件版本:取源码目录的 git 描述(副本里没有 .git,只能在源目录取)。
+# 设备信息面板靠它分辨"设备上跑的是哪次构建"。
+PROJECT_VER="$(git -C "$PROJECT_DIR" describe --tags --always --dirty 2>/dev/null || true)"
+if [[ -z "$PROJECT_VER" ]]; then
+  PROJECT_VER="dev-$(date +%Y%m%d)"
+fi
+echo "[build] PROJECT_VER=$PROJECT_VER"
+
 idf.py -B "$BUILD_DIR" set-target esp32c3
 
 # espressif/button is public, but this board needs the upstream ADC-glitch
@@ -47,7 +65,7 @@ else
   exit 2
 fi
 
-idf.py -B "$BUILD_DIR" build
+idf.py -DPROJECT_VER="$PROJECT_VER" -B "$BUILD_DIR" build
 idf.py -B "$BUILD_DIR" merge-bin -o "$BUILD_DIR/FoloToy-AI-Passport-full.bin"
 python3 tools/verify_firmware.py "$BUILD_DIR"
 

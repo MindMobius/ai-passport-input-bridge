@@ -17,6 +17,7 @@
 #include "app_protocol.h"
 #include "app_types.h"
 #include "console_cmds.h"
+#include "dev_info.h"
 #include "esp_log.h"
 #include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
@@ -244,7 +245,8 @@ static void send_sys_resp(const char *text, size_t len)
 static void send_device_hello(void)
 {
     char buf[APP_PROTO_TX_CAP];
-    size_t n = app_protocol_device_hello(buf, sizeof(buf), 2);   // proto 2 = USB 通道
+    // proto 2 = USB 通道;带设备身份(固件/芯片/Flash/MAC),电脑端写入设备信息面板
+    size_t n = app_protocol_device_hello(buf, sizeof(buf), 2, dev_info_get());
     if (n > 0) usb_link_send_event(buf, n);
 }
 

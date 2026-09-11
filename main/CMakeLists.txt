@@ -4,6 +4,7 @@ idf_component_register(
          "ui_pixel_math.c"
          "app_state.c"
          "app_protocol.c"
+         "dev_info.c"
          "app_events.c"
          "app_sound.c"
          "app_ui.c"
@@ -20,6 +21,9 @@ idf_component_register(
     INCLUDE_DIRS "."
     REQUIRES bsp
              json
+             esp_app_format  # dev_info.c:esp_app_get_description(固件版本上报)
+             esp_hw_support  # dev_info.c:esp_chip_info / esp_read_mac(芯片与 MAC)
+             spi_flash       # dev_info.c:esp_flash_get_size(Flash 容量)
              nvs_flash
              console  # IDF >= 5.5: esp_console 组件已重命名为 console
              bt

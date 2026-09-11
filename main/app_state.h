@@ -44,6 +44,16 @@ typedef struct {
     char           approval_diff[APP_DIFF_MAX];
     uint8_t        approval_risk;
     bool           approval_details;   // ▼ 详情视图开关
+    // ---- 电脑端心跳(bridge.status)----
+    // 与 link_up 正交互补:link_up 只说明"链路通",心跳说明"PC 侧的桥接进程
+    // 真的在跑"。两者分开存的理由:桥接进程被杀时链路事件可能永远不来
+    // (BLE 未断、USB 未拔),UI 需要靠心跳超时自己翻回"等待电脑端"。
+    uint64_t       pc_last_ms;      // 最近一次心跳时刻(0 = 从未收到)
+    bool           pc_online;       // 心跳在 APP_PC_STALE_MS 有效期内
+    char           pc_host[APP_PC_FIELD_MAX];
+    char           pc_sink[APP_PC_FIELD_MAX];
+    char           pc_mic[APP_PC_FIELD_MAX];
+    bool           pc_mic_auto;
 } app_state_t;
 
 void app_state_init(app_state_t *s);

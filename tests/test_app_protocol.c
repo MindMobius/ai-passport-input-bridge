@@ -92,6 +92,36 @@ static void test_parse_time_set(void) {
     assert(!app_protocol_parse(j5, strlen(j5), &ev));
 }
 
+// 电脑端心跳(连接信息上屏的数据源):字段全可选,但 type 命中即收下
+static void test_parse_bridge_status(void) {
+    const char *j = "{\"type\":\"bridge.status\",\"host\":\"DESKTOP-XHKJ\","
+                    "\"sink\":\"CABLE Input\",\"mic\":\"CABLE Output\",\"auto\":true}";
+    app_event_t ev;
+    assert(app_protocol_parse(j, strlen(j), &ev));
+    assert(ev.type == APP_EV_BRIDGE_STATUS);
+    assert(strcmp(ev.u.bridge_status.host, "DESKTOP-XHKJ") == 0);
+    assert(strcmp(ev.u.bridge_status.sink, "CABLE Input") == 0);
+    assert(strcmp(ev.u.bridge_status.mic, "CABLE Output") == 0);
+    assert(ev.u.bridge_status.mic_auto == 1);
+
+    // 只有心跳本身(桥接刚起来,还没填配置):仍然收下,字段按空渲染
+    const char *j2 = "{\"type\":\"bridge.status\"}";
+    assert(app_protocol_parse(j2, strlen(j2), &ev));
+    assert(ev.type == APP_EV_BRIDGE_STATUS);
+    assert(ev.u.bridge_status.host[0] == '\0');
+    assert(ev.u.bridge_status.mic_auto == 0);
+
+    // auto=false(用户关掉自动切换)必须落成 0,不能按缺省当 true
+    const char *j3 = "{\"type\":\"bridge.status\",\"mic\":\"\",\"auto\":false}";
+    assert(app_protocol_parse(j3, strlen(j3), &ev));
+    assert(ev.u.bridge_status.mic_auto == 0);
+
+    // 超长字段截断到 APP_PC_FIELD_MAX-1,不得越界
+    const char *j4 = "{\"type\":\"bridge.status\",\"host\":\"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\"}";
+    assert(app_protocol_parse(j4, strlen(j4), &ev));
+    assert(strlen(ev.u.bridge_status.host) == APP_PC_FIELD_MAX - 1);
+}
+
 static void test_parse_rejects(void) {
     app_event_t ev;
     assert(!app_protocol_parse("{\"type\":\"nope\"}", 14, &ev));             // 未知 type
@@ -204,10 +234,36 @@ static void test_serialize(void) {
     char buf[APP_PROTO_TX_CAP];
     size_t n;
 
-    n = app_protocol_device_hello(buf, sizeof(buf), 1);
+    n = app_protocol_device_hello(buf, sizeof(buf), 1, NULL);
     assert(n > 0 && buf[n - 1] == '\n');
     assert(strstr(buf, "\"event\":\"device.hello\""));
     assert(strstr(buf, "\"proto\":1"));
+    assert(strstr(buf, "\"fw\"") == NULL);   // info=NULL:不写身份字段(兼容旧调用)
+
+    // 带身份信息:PC 端控制台"设备信息"面板的数据源
+    app_dev_info_t info;
+    memset(&info, 0, sizeof(info));
+    snprintf(info.fw, sizeof(info.fw), "v2026.09.11.1");
+    snprintf(info.idf, sizeof(info.idf), "v5.5.3");
+    snprintf(info.chip, sizeof(info.chip), "ESP32-C3 r3");
+    snprintf(info.mac, sizeof(info.mac), "4C:11:AE:32:F1:48");
+    info.flash_mb = 4;
+    n = app_protocol_device_hello(buf, sizeof(buf), 2, &info);
+    assert(n > 0 && n < APP_PROTO_TX_CAP);
+    assert(strstr(buf, "\"proto\":2"));
+    assert(strstr(buf, "\"fw\":\"v2026.09.11.1\""));
+    assert(strstr(buf, "\"idf\":\"v5.5.3\""));
+    assert(strstr(buf, "\"chip\":\"ESP32-C3 r3\""));
+    assert(strstr(buf, "\"flash_mb\":4"));
+    assert(strstr(buf, "\"mac\":\"4C:11:AE:32:F1:48\""));
+
+    // 空字段不上报(不把"未知"伪装成真实值)
+    app_dev_info_t empty;
+    memset(&empty, 0, sizeof(empty));
+    n = app_protocol_device_hello(buf, sizeof(buf), 1, &empty);
+    assert(n > 0);
+    assert(strstr(buf, "\"fw\"") == NULL);
+    assert(strstr(buf, "\"mac\"") == NULL);
 
     n = app_protocol_voice_start(buf, sizeof(buf), "ima_adpcm");
     assert(n > 0);
@@ -252,11 +308,11 @@ static void test_serialize(void) {
 static void test_serialize_small_cap(void) {
     char buf[64];
     // cap < 2:返回 0(不得下溢成超大 memcpy)
-    assert(app_protocol_device_hello(buf, 0, 1) == 0);
-    assert(app_protocol_device_hello(buf, 1, 1) == 0);
+    assert(app_protocol_device_hello(buf, 0, 1, NULL) == 0);
+    assert(app_protocol_device_hello(buf, 1, 1, NULL) == 0);
     assert(app_protocol_voice_start(buf, 1, "ima_adpcm") == 0);
     // 小 cap:截断但仍以 \n 行分隔结尾、有 NUL
-    size_t n = app_protocol_device_hello(buf, 16, 1);
+    size_t n = app_protocol_device_hello(buf, 16, 1, NULL);
     assert(n > 0 && n < 16);
     assert(buf[n - 1] == '\n');
     assert(buf[n] == '\0');
@@ -267,6 +323,7 @@ int main(void) {
     test_parse_approval();
     test_parse_transcript();
     test_parse_time_set();
+    test_parse_bridge_status();
     test_parse_rejects();
     test_parse_deep_nesting_rejected();
     test_parse_long_line_truncation();

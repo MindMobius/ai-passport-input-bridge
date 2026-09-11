@@ -41,6 +41,9 @@ typedef struct {
     lv_obj_t *ap_title;                   // APPROVAL:标题
     lv_obj_t *ap_target;                  // APPROVAL:目标
     lv_obj_t *ap_diff;                    // APPROVAL:摘要/详情
+    lv_obj_t *stat_link;                  // HOME/READY:链路 + 电脑端状态行
+    lv_obj_t *stat_mic;                   // HOME/READY:虚拟声卡/麦克风行
+    lv_obj_t *stat_diag;                  // READY:电量 mV / MTU / 丢帧(诊断行)
 } page_t;
 
 static lv_obj_t *s_chrome;                // 顶层容器(lv_layer_top)
@@ -57,6 +60,7 @@ static lv_obj_t *s_toast;
 static page_t s_pages[APP_ST_COUNT];
 static app_stage_t s_cur_page = APP_ST_COUNT;
 static bool s_last_screen_on = true;
+static int  s_last_info_state = -1;   // 连接信息配色档(0=离线 1=仅链路 2=链路+PC)
 static lv_obj_t *s_bg;   // 基底屏:所有状态页都是它的子对象(单屏方案)
 
 static const char *const RISK_NAMES[APP_RISK_COUNT] = { "LOW RISK", "MEDIUM RISK", "HIGH RISK" };
@@ -176,6 +180,9 @@ static void build_home(void)
 
     ui_pixel_mascot_create(p->root, 100, 132);
     label(p->root, "TAP UP TO START", &lv_font_montserrat_14, UI_MUTED, 0, 216, W);
+    // 连接信息两行:上=链路+电脑端是否在线,下=虚拟声卡/麦克风(render 填文本)
+    p->stat_link = label(p->root, "", &lv_font_montserrat_14, UI_MUTED, 0, 236, W);
+    p->stat_mic  = label(p->root, "", &lv_font_montserrat_14, UI_DIM, 0, 254, W);
     hint_label(p->root, "UP: SPEAK   DOWN: PASTE   OK: SEND");
 }
 
@@ -193,7 +200,11 @@ static void build_ready(void)
     // 工作流切换已取消(固定 build),READY 为简单就绪页
     label(p->root, "READY", &lv_font_montserrat_20, UI_TEXT, 0, CONTENT_Y + 40, W);
     block(p->root, 104, CONTENT_Y + 70, 32, 1, UI_ACCENT);
-    label(p->root, "LINK UP / MIC ARMED", &lv_font_montserrat_14, UI_DIM, 0, 190, W);
+    // 原静态 "LINK UP / MIC ARMED" 升级为实时链路/电脑端状态(render 填文本)
+    p->stat_link = label(p->root, "", &lv_font_montserrat_14, UI_DIM, 0, 190, W);
+    p->stat_mic  = label(p->root, "", &lv_font_montserrat_14, UI_DIM, 0, 210, W);
+    // 诊断行(电量毫伏/MTU/丢帧):只在 READY 页,技术细节不占主页版面
+    p->stat_diag = label(p->root, "", &lv_font_montserrat_14, UI_DIM, 0, 230, W);
     hint_label(p->root, "UP: SPEAK   DOWN: PASTE   OK: SEND");
 }
 
@@ -364,6 +375,70 @@ esp_err_t app_ui_init(void)
 }
 
 // ---- 渲染 ----
+// 连接信息两行(仅 HOME/READY 显示):
+//   LINK <通道> / PC <ONLINE|WAITING>
+//   MIC <虚拟声卡麦克风>(auto)  或  MIC AUTO OFF / START BRIDGE ON PC
+// 配色档只在跨档时写样式 —— 每帧 set_style 会让整行重绘(与 label 的
+// dirty-check 同一动机)。
+static void render_link_info(const app_ui_snapshot_t *snap)
+{
+    char l1[48];
+    char l2[48];
+    const int info_state = !snap->link_up ? 0 : (snap->pc_online ? 2 : 1);
+
+    snprintf(l1, sizeof(l1), "LINK %s / PC %s",
+             snap->link_up ? snap->link_name : "NONE",
+             snap->pc_online ? "ONLINE" : "WAITING");
+    if (snap->pc_online) {
+        if (snap->pc_mic_auto && snap->pc_mic[0]) {
+            snprintf(l2, sizeof(l2), "MIC %s (auto)", snap->pc_mic);
+        } else if (snap->pc_mic[0]) {
+            snprintf(l2, sizeof(l2), "MIC %s", snap->pc_mic);
+        } else if (snap->pc_sink[0]) {
+            snprintf(l2, sizeof(l2), "SINK %s", snap->pc_sink);
+        } else {
+            snprintf(l2, sizeof(l2), "MIC AUTO OFF");
+        }
+    } else if (snap->link_up) {
+        // 链路在但收不到心跳:桥接进程没跑/卡住(最容易踩的一种)
+        snprintf(l2, sizeof(l2), "PC BRIDGE NOT RESPONDING");
+    } else {
+        // 双通道都没通:设备在广播/等 USB,等的是电脑端那一步
+        snprintf(l2, sizeof(l2), "START BRIDGE ON PC");
+    }
+
+    for (int pg = APP_ST_HOME; pg <= APP_ST_READY; pg++) {
+        label_set_if_changed(s_pages[pg].stat_link, l1);
+        label_set_if_changed(s_pages[pg].stat_mic, l2);
+    }
+
+    // 诊断行(READY):电量毫伏 + BLE MTU + 音频/事件丢帧。MTU 仅 BLE 有意义,
+    // 无连接时为 0 → 省略,免得 USB 会话里显示 "MTU0" 这种噪音。
+    {
+        char l3[48];
+        char mtu[12] = "";
+        if (snap->mtu > 0) snprintf(mtu, sizeof(mtu), "  MTU%u", (unsigned)snap->mtu);
+        if (snap->battery_mv >= 0) {
+            snprintf(l3, sizeof(l3), "%dmV%s  DROP %u/%u", snap->battery_mv, mtu,
+                     (unsigned)snap->audio_drops, (unsigned)snap->event_drops);
+        } else {
+            snprintf(l3, sizeof(l3), "--mV%s  DROP %u/%u", mtu,
+                     (unsigned)snap->audio_drops, (unsigned)snap->event_drops);
+        }
+        label_set_if_changed(s_pages[APP_ST_READY].stat_diag, l3);
+    }
+
+    if (info_state != s_last_info_state) {
+        // 2 = 链路 + 电脑端都在线(暖橙);1 = 只有链路(次级灰);0 = 无链路(弱化)
+        static const uint32_t LINK_COLORS[3] = { UI_DIM, UI_MUTED, UI_ACCENT };
+        uint32_t color = LINK_COLORS[info_state];
+        for (int pg = APP_ST_HOME; pg <= APP_ST_READY; pg++) {
+            lv_obj_set_style_text_color(s_pages[pg].stat_link, lv_color_hex(color), 0);
+        }
+        s_last_info_state = info_state;
+    }
+}
+
 void app_ui_render(const app_ui_snapshot_t *snap)
 {
     // 息屏/唤醒:背光切换(内容照常更新,唤醒后即为最新)
@@ -393,6 +468,9 @@ void app_ui_render(const app_ui_snapshot_t *snap)
                              snap->link_name);
     set_hidden(s_offline_banner, snap->link_up);
     set_hidden(s_netbusy_banner, !snap->net_busy || !snap->link_up);
+
+    // 连接信息(HOME/READY 两页共用同一份文本)
+    render_link_info(snap);
 
     if (snap->toast[0]) {
         label_set_if_changed(s_toast, snap->toast);
@@ -438,4 +516,3 @@ void app_ui_render(const app_ui_snapshot_t *snap)
         break;
     }
 }
-

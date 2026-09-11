@@ -1446,6 +1446,57 @@ static void test_usb_link_down(void) {
 }
 
 // ---- 校时下行:透传动作,状态不变(与链路状态正交) ----
+// ---- 电脑端心跳(连接信息行):收到即 ONLINE,超时自己翻回 WAITING ----
+// 与 link_up 正交:桥接进程被杀时链路事件可能永远不来(BLE 没断、USB 没拔),
+// 设备必须靠心跳超时自己收敛,否则屏幕会一直停在 "PC ONLINE" 骗人。
+static void test_bridge_status_pc_online(void) {
+    reset();
+    s.link_up = true;
+    s.link_channel = APP_CHAN_USB;
+    s.state = APP_ST_READY;
+
+    app_ui_snapshot_t snap;
+    app_state_snapshot(&s, now, &snap);
+    assert(snap.pc_online == false);                       // 没收到心跳前:WAITING
+
+    app_event_t ev = { .type = APP_EV_BRIDGE_STATUS };
+    snprintf(ev.u.bridge_status.host, sizeof(ev.u.bridge_status.host), "DESKTOP-XHKJ");
+    snprintf(ev.u.bridge_status.sink, sizeof(ev.u.bridge_status.sink), "CABLE Input");
+    snprintf(ev.u.bridge_status.mic, sizeof(ev.u.bridge_status.mic), "CABLE Output");
+    ev.u.bridge_status.mic_auto = 1;
+    app_state_reduce(&s, &ev, now, out, &on);
+    assert(s.pc_online == true);
+    assert(s.state == APP_ST_READY);                       // 心跳不碰会话状态
+
+    app_state_snapshot(&s, now, &snap);
+    assert(snap.pc_online == true);
+    assert(strcmp(snap.pc_host, "DESKTOP-XHKJ") == 0);
+    assert(strcmp(snap.pc_sink, "CABLE Input") == 0);
+    assert(strcmp(snap.pc_mic, "CABLE Output") == 0);
+    assert(snap.pc_mic_auto == true);
+
+    // 有效期内的心跳持续续期:不翻(心跳把计时起点一起刷新)
+    const uint64_t hb = now + APP_PC_STALE_MS - 100;
+    app_state_reduce(&s, &ev, hb, out, &on);
+    assert(s.pc_online == true);
+
+    // 距最近一次心跳超过有效期:tick 翻 WAITING(并且真的产出了 UI_REFRESH)
+    reduce(APP_EV_TICK, hb + APP_PC_STALE_MS + 200);
+    assert(s.pc_online == false);
+    assert(has_action(APP_ACT_UI_REFRESH));
+    app_state_snapshot(&s, hb + APP_PC_STALE_MS + 200, &snap);
+    assert(snap.pc_online == false);
+    assert(strcmp(snap.pc_host, "DESKTOP-XHKJ") == 0);     // 文本保留,只翻在线位
+
+    // 链路断开:立刻翻离线(不等 6s),避免断链后状态行还写着 ONLINE
+    app_state_reduce(&s, &ev, hb + APP_PC_STALE_MS + 300, out, &on);
+    assert(s.pc_online == true);
+    ev = (app_event_t){ .type = APP_EV_USB_DISCONNECTED };
+    app_state_reduce(&s, &ev, hb + APP_PC_STALE_MS + 400, out, &on);
+    assert(s.pc_online == false);
+    assert(s.link_up == false);
+}
+
 static void test_time_set(void) {
     reset();
     s.link_up = true;
@@ -1605,6 +1656,7 @@ int main(void) {
     test_usb_link_up();
     test_usb_link_down();
     test_time_set();
+    test_bridge_status_pc_online();
     test_bounded();
     test_dual_session_survives_other_channel();
     test_dual_active_channel_down_fails_over();

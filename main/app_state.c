@@ -152,6 +152,14 @@ void app_state_snapshot(const app_state_t *s, uint64_t now_ms, app_ui_snapshot_t
     if (s->toast[0] && s->toast_until_ms > 0) {
         str_cpy(snap->toast, sizeof(snap->toast), s->toast);
     }
+    // 连接信息:PC 侧字段 + 心跳有效期;battery_mv/mtu/drops 由主循环补
+    // (它们来自 BSP/链路层,状态机保持无 IDF 依赖)。
+    snap->pc_online   = s->pc_online;
+    snap->pc_mic_auto = s->pc_mic_auto;
+    str_cpy(snap->pc_host, sizeof(snap->pc_host), s->pc_host);
+    str_cpy(snap->pc_sink, sizeof(snap->pc_sink), s->pc_sink);
+    str_cpy(snap->pc_mic,  sizeof(snap->pc_mic),  s->pc_mic);
+    snap->battery_mv = -1;   // 主循环补真实值;未补时按"不可用"渲染
     // 默认展示名仅在没有真实 agent.status 时兜底,不覆盖已存的 thinking/error 等
     if ((s->state == APP_ST_AGENT_RUNNING || s->state == APP_ST_TRANSCRIBING) &&
         snap->agent_state_name[0] == '\0') {
@@ -422,6 +430,14 @@ static void handle_key(app_state_t *s, const app_event_t *ev, uint64_t now_ms,
 }
 
 static void handle_tick(app_state_t *s, uint64_t now_ms, app_action_t *out, uint8_t *n, uint8_t max) {
+    // 电脑端心跳超时:放在息屏早退之前 —— 熄屏期间状态也要跟着走,
+    // 否则唤醒瞬间会渲染出过期的 "PC ONLINE"。
+    if (s->pc_online && (now_ms - s->pc_last_ms) > APP_PC_STALE_MS) {
+        s->pc_online = false;
+        app_action_t r = { .type = APP_ACT_UI_REFRESH };
+        emit(out, n, max, r);
+    }
+
     // toast 过期
     if (s->toast[0] && now_ms >= s->toast_until_ms) {
         s->toast[0] = '\0';
@@ -494,6 +510,9 @@ static void handle_link_down(app_state_t *s, uint64_t now_ms, const char *toast,
     // CANCEL:断链时无 Mac 可发,清残留防断链前的帧流入下一次会话
     app_action_t st = { .type = APP_ACT_STREAM_CANCEL };
     emit(out, n, max, st);   // 幂等,未开流时执行器无副作用
+    // 链路断了,电脑端心跳必然断了:立刻翻离线,别让状态行停在 ONLINE
+    // (新链路可能立刻接上并重发心跳,那时再翻回来)。
+    s->pc_online = false;
     set_toast(s, now_ms, toast);   // 任何状态都提示断开(审批保持等场景也可见)
     switch (s->state) {
     case APP_ST_LISTENING:
@@ -609,6 +628,21 @@ void app_state_reduce(app_state_t *s, const app_event_t *ev, uint64_t now_ms,
         }
         break;
 
+    case APP_EV_BRIDGE_STATUS:
+        // 电脑端心跳:主机名/虚拟声卡/麦克风目标。只影响 UI(连接信息行),
+        // 不碰会话状态 —— 心跳丢了(桥接进程被杀)靠 handle_tick 的超时翻牌。
+        str_cpy(s->pc_host, sizeof(s->pc_host), ev->u.bridge_status.host);
+        str_cpy(s->pc_sink, sizeof(s->pc_sink), ev->u.bridge_status.sink);
+        str_cpy(s->pc_mic, sizeof(s->pc_mic), ev->u.bridge_status.mic);
+        s->pc_mic_auto = ev->u.bridge_status.mic_auto != 0;
+        s->pc_last_ms = now_ms;
+        s->pc_online = true;
+        {
+            app_action_t r = { .type = APP_ACT_UI_REFRESH };
+            emit(out, out_n, max, r);
+        }
+        break;
+
     case APP_EV_AUDIO_DROP_START:
         if (!s->net_busy) {
             s->net_busy = true;
@@ -641,6 +675,12 @@ void app_state_reduce(app_state_t *s, const app_event_t *ev, uint64_t now_ms,
         {
             app_action_t b = { .type = APP_ACT_UI_REFRESH };
             emit(out, out_n, max, b);
+        }
+        // 通道刚就绪:上报设备身份(固件/芯片/Flash/MAC),电脑端据此填设备信息。
+        // USB 侧在同一条握手路径里由 usb_link.c 直接发,这里只管 BLE。
+        {
+            app_action_t h = { .type = APP_ACT_SEND_HELLO };
+            emit(out, out_n, max, h);
         }
         break;
 
@@ -748,5 +788,3 @@ void app_state_reduce(app_state_t *s, const app_event_t *ev, uint64_t now_ms,
         break;
     }
 }
-
-

@@ -122,6 +122,25 @@ static bool parse_time_set(const cJSON *o, app_event_t *ev) {
     return true;
 }
 
+// 电脑端心跳:{"type":"bridge.status","host":..,"sink":..,"mic":..,"auto":bool}
+// 全部字段可选 —— 缺字段即空串(false/0),设备 UI 按"未知"渲染。唯一硬要求是
+// type 已匹配,所以这里恒返回 true:心跳本身就有价值(证明 PC 侧活着)。
+static bool parse_bridge_status(const cJSON *o, app_event_t *ev) {
+    const cJSON *v = cJSON_GetObjectItemCaseSensitive(o, "host");
+    str_take(ev->u.bridge_status.host, sizeof(ev->u.bridge_status.host),
+             cJSON_IsString(v) ? v->valuestring : "");
+    v = cJSON_GetObjectItemCaseSensitive(o, "sink");
+    str_take(ev->u.bridge_status.sink, sizeof(ev->u.bridge_status.sink),
+             cJSON_IsString(v) ? v->valuestring : "");
+    v = cJSON_GetObjectItemCaseSensitive(o, "mic");
+    str_take(ev->u.bridge_status.mic, sizeof(ev->u.bridge_status.mic),
+             cJSON_IsString(v) ? v->valuestring : "");
+    v = cJSON_GetObjectItemCaseSensitive(o, "auto");
+    ev->u.bridge_status.mic_auto = (cJSON_IsBool(v) && cJSON_IsTrue(v)) ? 1 : 0;
+    ev->type = APP_EV_BRIDGE_STATUS;
+    return true;
+}
+
 bool app_protocol_parse(const char *json, size_t len, app_event_t *ev) {
     if (!json || len == 0 || len > APP_PROTO_RX_CAP) return false;
     if (!json_depth_ok(json, len)) return false;   // 深层嵌套:拒绝,保护解析者栈
@@ -134,6 +153,7 @@ bool app_protocol_parse(const char *json, size_t len, app_event_t *ev) {
         else if (strcmp(type->valuestring, "agent.approval_request") == 0) ok = parse_approval(root, ev);
         else if (strcmp(type->valuestring, "transcript") == 0)           ok = parse_transcript(root, ev);
         else if (strcmp(type->valuestring, "time.set") == 0)             ok = parse_time_set(root, ev);
+        else if (strcmp(type->valuestring, "bridge.status") == 0)        ok = parse_bridge_status(root, ev);
         // 未知 type:丢弃(返回 false,调用方记日志)
     }
     cJSON_Delete(root);
@@ -163,10 +183,20 @@ static size_t serialize(cJSON *root, char *buf, size_t cap) {
     return n;
 }
 
-size_t app_protocol_device_hello(char *buf, size_t cap, int proto) {
+size_t app_protocol_device_hello(char *buf, size_t cap, int proto,
+                                 const app_dev_info_t *info) {
     cJSON *o = cJSON_CreateObject();
     cJSON_AddStringToObject(o, "event", "device.hello");
     cJSON_AddNumberToObject(o, "proto", proto);
+    // 身份字段全部可选:PC 侧(companion)按缺字段容错,旧固件/新固件互通。
+    // 空串不写 —— 避免把"未知"伪装成真实值落到控制台的设备信息面板。
+    if (info) {
+        if (info->fw[0])      cJSON_AddStringToObject(o, "fw", info->fw);
+        if (info->idf[0])     cJSON_AddStringToObject(o, "idf", info->idf);
+        if (info->chip[0])    cJSON_AddStringToObject(o, "chip", info->chip);
+        if (info->flash_mb > 0) cJSON_AddNumberToObject(o, "flash_mb", info->flash_mb);
+        if (info->mac[0])     cJSON_AddStringToObject(o, "mac", info->mac);
+    }
     size_t n = serialize(o, buf, cap);
     cJSON_Delete(o);
     return n;
@@ -229,4 +259,3 @@ size_t app_protocol_agent_action(char *buf, size_t cap, const char *task_id,
     cJSON_Delete(o);
     return n;
 }
-

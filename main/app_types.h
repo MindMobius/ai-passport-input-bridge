@@ -60,6 +60,7 @@ typedef enum {
     APP_EV_AGENT_STATUS,
     APP_EV_APPROVAL_REQUEST,
     APP_EV_TRANSCRIPT,
+    APP_EV_BRIDGE_STATUS,   // 电脑端心跳(bridge.status:主机名/虚拟声卡/麦克风切换)
     APP_EV_AUDIO_DROP_START,
     APP_EV_AUDIO_DROP_END,
     APP_EV_BLE_CONNECTED,   // 链路通:EVENT 特征已被订阅(PTT 可用的充分条件)
@@ -124,6 +125,8 @@ typedef enum {
 // 显示通道:须 ≥ APP_TRANSCRIPT_MAX,保证 relay 按 128B 切分的转写行完整落屏
 #define APP_AGENT_MSG_MAX     APP_TRANSCRIPT_MAX
 #define APP_TOAST_MAX         64
+// 电脑端状态字段上限(主机名/虚拟声卡/麦克风切换目标;下行 bridge.status)
+#define APP_PC_FIELD_MAX      24
 
 // 事件(定长结构,入队拷贝,union 保小)
 typedef struct {
@@ -149,6 +152,12 @@ typedef struct {
             bool final;                                 // false=预览态(未定稿);true=定稿落定
         } transcript;                                   // TRANSCRIPT
         struct { int64_t epoch; } time_set;             // TIME_SET(UTC 秒,int64 对齐 8,union 仍 ≤228B)
+        struct {
+            char host[APP_PC_FIELD_MAX];                // 电脑主机名(bridge.status.host)
+            char sink[APP_PC_FIELD_MAX];                // 虚拟声卡输出端点(bridge.status.sink)
+            char mic[APP_PC_FIELD_MAX];                 // 会话内切换的麦克风目标(mic)
+            uint8_t mic_auto;                           // 是否开启"会话内自动切换默认麦克风"
+        } bridge_status;                                // BRIDGE_STATUS
     } u;
 } app_event_t;
 
@@ -169,6 +178,7 @@ typedef enum {
     APP_ACT_STREAM_CANCEL,   // 取消/断链:停采集 + 清空 ring + 丢弃在途帧(与 STOP 区别:不排空发送)
     APP_ACT_PLAY_TONE,
     APP_ACT_TIME_SET,        // time_sync_set_epoch(校时落地)
+    APP_ACT_SEND_HELLO,      // 通道就绪后上报设备身份(dev_info + proto)
 } app_action_type_t;
 
 // 单事件最多产出的动作数。emit() 满了就静默丢弃,所以这个值必须 ≥ 最长的
@@ -214,6 +224,16 @@ typedef struct {
     uint8_t        approval_risk;   // app_risk_t
     uint32_t       elapsed_ms;      // 当前状态已持续时长(主循环在快照时补)
     char           toast[APP_TOAST_MAX];
+    // ---- 连接信息(设备自测值由主循环补:Battery/MTU/丢帧;PC 侧来自 bridge.status)----
+    char           pc_host[APP_PC_FIELD_MAX];   // 电脑主机名(空 = 未收到心跳)
+    char           pc_sink[APP_PC_FIELD_MAX];   // 虚拟声卡输出端点(PC 正在写入哪个声卡)
+    char           pc_mic[APP_PC_FIELD_MAX];    // 会话内切换的默认麦克风目标
+    bool           pc_mic_auto;                 // 自动切换默认麦克风是否开启
+    bool           pc_online;                   // 心跳在有效期内(BRIDGE_STATUS_STALE_MS)
+    int            battery_mv;                  // 电池毫伏(-1 = 不可用)
+    uint16_t       mtu;                         // BLE 协商 MTU(0 = 无连接)
+    uint32_t       audio_drops;                 // BLE 音频帧丢弃累计
+    uint32_t       event_drops;                 // BLE 事件行丢弃累计
 } app_ui_snapshot_t;
 
 // ---------------- 超时常量 ----------------
@@ -222,6 +242,10 @@ typedef struct {
 #define APP_TRANSCRIBE_TIMEOUT  30000u   // 转写等待超时
 #define APP_AGENT_RUN_TIMEOUT   90000u   // Agent 执行超时
 #define APP_TICK_MS             100u     // 应用任务心跳
+// 电脑端心跳有效期:bridge.status 每 2s 一行(companion),6s 没收到即视为离线
+// (UI 的 PC 状态行据此从 ONLINE 翻 WAITING,不依赖断链事件 —— 桥接进程被
+// 杀掉时链路事件可能永远不来)
+#define APP_PC_STALE_MS         6000u
 // S3:START 音后未收 TONE_DONE 的最大等待(兜底开流)。500 → 200(2026-08-29):
 // 滴声本身只有 80ms,500ms 的余量是给"声音任务被挤住"留的,可它同时也是 PTT 最
 // 坏延迟 —— 真机抓到过一次按下到开录 622ms(= 本值 + APP_TICK_MS 粒度),用户已
@@ -240,5 +264,3 @@ typedef struct {
 #ifdef __cplusplus
 }
 #endif
-
-

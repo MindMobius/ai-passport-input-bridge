@@ -10,6 +10,7 @@
 #include "audio_streamer.h"
 #include "ble_audio.h"
 #include "console_cmds.h"
+#include "dev_info.h"
 #include "mode.h"
 #include "nvs_settings.h"
 #include "usb_link.h"
@@ -278,6 +279,13 @@ static void run_actions(const app_action_t *acts, uint8_t n)
             // 校时落地:写系统时间 + 置校时标志(app_task 上下文,单写点)
             time_sync_set_epoch(a->u.time_set.epoch);
             break;
+        case APP_ACT_SEND_HELLO:
+            // 通道就绪上报设备身份(proto 1 = BLE;USB 侧由 usb_link.c 在握手
+            // 路径直接发,不经过这里)。走普通事件通道:身份丢了不影响会话,
+            // 下一次通道就绪会再发一遍。
+            len = app_protocol_device_hello(buf, sizeof(buf), 1, dev_info_get());
+            send_event_line(buf, len);
+            break;
         case APP_ACT_PLAY_TONE:
             // S3:START 改异步播放,开流由 sound_worker 播完后的 TONE_DONE 事件驱动
             // (app_state 归约,分时语义保持:滴声先于采集)。app_task 不再阻塞 80ms。
@@ -452,6 +460,11 @@ static void app_task(void *arg)
                 if (snap.screen_on || s_ui_screen_on) {
                     snap.battery_available = (s_batt_soc >= 0);
                     snap.battery_soc = (s_batt_soc > 0) ? (uint8_t)s_batt_soc : 0;
+                    // 连接信息实测值(状态机不管 BSP/链路层,快照在这里补齐)
+                    snap.battery_mv = bsp_battery_mv();
+                    snap.mtu = ble_audio_mtu();
+                    snap.audio_drops = ble_audio_audio_drops();
+                    snap.event_drops = ble_audio_event_drops();
                     app_ui_render(&snap);
                     s_ui_screen_on = snap.screen_on;
                 }
@@ -627,4 +640,3 @@ void app_main(void)
              snd_ok == ESP_OK ? "ok" : "fail",
              batt_ok == ESP_OK ? "ok" : "fail");
 }
-
