@@ -18,6 +18,10 @@ esp_err_t app_sound_init(void);
 // START 音播完会 post APP_EV_TONE_DONE(开流信号);返回 false 时调用方须自行兜底。
 bool app_sound_play(app_tone_t tone);
 
+// 设置提示音档位(app_beep_t:off / soft / full)。off 时 play 直接返回 false,
+// 调用方按"没播成"走兜底(立即开流),流程不受影响。
+void app_sound_set_level(uint8_t level);
+
 // 同步播放:在调用者上下文中阻塞播完。仅保留给非 S3 场景的确定性播放
 // (当前无调用方,防回归保留;START 已改异步)。
 void app_sound_play_sync(app_tone_t tone);

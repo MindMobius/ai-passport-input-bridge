@@ -33,6 +33,10 @@ typedef struct {
                                      // TRANSCRIBING 态单击退出判定用(见 state.c)
     uint64_t       ble_connect_ms;  // BLE 连接时刻(连接握手期密集射频 → 假长按,抑制 PTT)
     uint64_t       toast_until_ms;
+    // 息屏时间(电脑端可下发;0 = 不熄屏)。默认见 app_types.h 的
+    // APP_IDLE_*_DEFAULT —— 桌面场景 20s 太短,默认抬到 2 分钟。
+    uint32_t       idle_backlight_off_ms;
+    uint32_t       idle_panel_off_ms;
     bool           stream_started;  // 本会话采集是否已开(START 音播完后 TONE_DONE 驱动)
     char           toast[APP_TOAST_MAX];
     char           agent_message[APP_AGENT_MSG_MAX];

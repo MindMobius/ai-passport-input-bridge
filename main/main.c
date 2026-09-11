@@ -290,6 +290,25 @@ static void run_actions(const app_action_t *acts, uint8_t n)
             len = app_protocol_device_hello(buf, sizeof(buf), 1, dev_info_get());
             send_event_line(buf, len);
             break;
+        case APP_ACT_APPLY_DEVICE_CFG: {
+            // 设备设置落地:提示音档位立即生效 + 两项都写 NVS(下次开机沿用)。
+            uint8_t level = a->u.device_cfg.beep;
+            if (level == APP_BEEP_UNSET) {
+                nvs_settings_get_beep_level(&level);   // 本帧没提提示音:保持现值
+            } else {
+                nvs_settings_set_beep_level(level);
+            }
+            app_sound_set_level(level);
+            const uint16_t sec = a->u.device_cfg.screen_off_s;
+            if (sec != 0xFFFF) {
+                nvs_settings_set_screen_off_s(sec);
+            }
+            ESP_LOGI(TAG, "设备设置:提示音=%s 息屏=%us",
+                     level == APP_BEEP_OFF ? "off" : (level == APP_BEEP_FULL ? "full" : "soft"),
+                     (unsigned)(sec == 0xFFFF ? s_state.idle_backlight_off_ms / 1000
+                                              : sec));
+            break;
+        }
         case APP_ACT_PLAY_TONE:
             // S3:START 改异步播放,开流由 sound_worker 播完后的 TONE_DONE 事件驱动
             // (app_state 归约,分时语义保持:滴声先于采集)。app_task 不再阻塞 80ms。
@@ -610,6 +629,22 @@ void app_main(void)
     button_adc_set_ignore_until(esp_timer_get_time() + 3 * 1000 * 1000);
     esp_err_t snd_ok = app_sound_init();
     if (snd_ok != ESP_OK) ESP_LOGW(TAG, "提示音初始化失败");
+    // 设备设置(NVS):提示音档位与息屏秒数开机即生效,不必等电脑端下发。
+    // 走事件而非直接改 s_state —— 息屏推导(面板 = 背光 × 倍数)只在状态机里有一份。
+    if (snd_ok == ESP_OK) {
+        uint8_t beep = APP_BEEP_SOFT;
+        uint16_t screen_s = 120;
+        nvs_settings_get_beep_level(&beep);
+        nvs_settings_get_screen_off_s(&screen_s);
+        app_sound_set_level(beep);
+        app_event_t dcfg = { .type = APP_EV_DEVICE_CONFIG };
+        dcfg.u.device_config.beep = beep;
+        dcfg.u.device_config.screen_off_s = screen_s;
+        app_event_post(&dcfg);
+        ESP_LOGI(TAG, "设备设置:提示音=%s 息屏=%us",
+                 beep == APP_BEEP_OFF ? "off" : (beep == APP_BEEP_FULL ? "full" : "soft"),
+                 (unsigned)screen_s);
+    }
     esp_err_t batt_ok = bsp_battery_init();
     if (batt_ok != ESP_OK) ESP_LOGW(TAG, "电量计初始化失败(UI 显示 --)");
 

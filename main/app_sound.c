@@ -13,7 +13,12 @@ static const char *TAG = "app_sound";
 
 #define SAMPLE_RATE 16000
 #define CHUNK_SAMPLES 256   // 每块 ~16ms,控制栈上临时缓冲
-#define AMPLITUDE 5000      // 方波幅度(±),低于 demo 的 6000 稍柔和
+
+// 提示音档位(电脑端可下发,见 app_sound_set_level)。
+// AMPLITUDE/音量都运行时可变:SOFT 是默认档 —— 桌面场景下不吵人,又留一点
+// 操作反馈(2026-09-11 用户反馈"不要总是响出那种声音")。
+static bool     s_enabled = true;
+static int16_t  s_amplitude = 2500;
 
 // ---- 音色表:各音 = 若干 {频率Hz, 时长ms} 段 ----
 typedef struct { uint16_t hz; uint16_t ms; } tone_seg_t;
@@ -37,7 +42,7 @@ static void play_segment(uint16_t hz, uint16_t ms) {
     while (total > 0) {
         int n = total < CHUNK_SAMPLES ? total : CHUNK_SAMPLES;
         for (int i = 0; i < n; i++) {
-            buf[i] = (phase < half) ? AMPLITUDE : -AMPLITUDE;
+            buf[i] = (phase < half) ? s_amplitude : (int16_t)(-s_amplitude);
             if (++phase >= period) phase = 0;
         }
         if (bsp_audio_write(buf, (size_t)n * sizeof(int16_t)) != ESP_OK) {
@@ -114,6 +119,7 @@ esp_err_t app_sound_init(void) {
 }
 
 bool app_sound_play(app_tone_t tone) {
+    if (!s_enabled) return false;   // 关掉提示音:调用方兜底路径立即开流
     if (xQueueSend(s_queue, &tone, 0) != pdTRUE) {
         ESP_LOGW(TAG, "提示音队列满,丢弃 %d", (int)tone);
         return false;
@@ -121,6 +127,26 @@ bool app_sound_play(app_tone_t tone) {
     return true;
 }
 
+void app_sound_set_level(uint8_t level) {
+    switch ((app_beep_t)level) {
+    case APP_BEEP_OFF:
+        s_enabled = false;
+        break;
+    case APP_BEEP_FULL:
+        s_enabled = true;
+        s_amplitude = 5000;
+        bsp_audio_set_volume(80);
+        break;
+    case APP_BEEP_SOFT:
+    default:
+        s_enabled = true;
+        s_amplitude = 2500;
+        bsp_audio_set_volume(35);
+        break;
+    }
+    ESP_LOGI(TAG, "提示音档位 = %s", !s_enabled ? "off" : (level == APP_BEEP_FULL ? "full" : "soft"));
+}
+
 void app_sound_play_sync(app_tone_t tone) {
-    play_tone_impl(tone);
+    if (s_enabled) play_tone_impl(tone);
 }

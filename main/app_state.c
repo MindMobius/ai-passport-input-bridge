@@ -111,6 +111,8 @@ void app_state_init(app_state_t *s) {
     s->link_channel = APP_CHAN_BLE;   // 缺省 BLE(首通道连接前 PTT 门禁靠 link_up)
     s->locked = false;             // 开机未锁定
     s->wake_ms = 0;                // 无唤醒史 → 首个 OK LONG 不受 guard 限制
+    s->idle_backlight_off_ms = APP_IDLE_BACKLIGHT_OFF_MS_DEFAULT;
+    s->idle_panel_off_ms     = APP_IDLE_PANEL_OFF_MS_DEFAULT;
 }
 
 static void emit(app_action_t *out, uint8_t *n, uint8_t max, app_action_t a) {
@@ -456,12 +458,15 @@ static void handle_tick(app_state_t *s, uint64_t now_ms, app_action_t *out, uint
                             (s->state == APP_ST_HOME ||
                              s->state == APP_ST_READY);
     if (idle_state) {
-        if (s->screen_on && (now_ms - s->last_key_ms) >= APP_IDLE_BACKLIGHT_OFF_MS) {
+        // 0 = 不熄屏(电脑端把"设备息屏秒数"设成 0 的场景)
+        if (s->idle_backlight_off_ms > 0 && s->screen_on &&
+            (now_ms - s->last_key_ms) >= s->idle_backlight_off_ms) {
             s->screen_on = false;
             app_action_t a = { .type = APP_ACT_UI_SCREEN_OFF };
             emit(out, n, max, a);
         }
-        if (s->panel_on && (now_ms - s->last_key_ms) >= APP_IDLE_PANEL_OFF_MS) {
+        if (s->idle_panel_off_ms > 0 && s->panel_on &&
+            (now_ms - s->last_key_ms) >= s->idle_panel_off_ms) {
             s->panel_on = false;
             app_action_t a = { .type = APP_ACT_UI_PANEL_OFF };
             emit(out, n, max, a);
@@ -642,6 +647,27 @@ void app_state_reduce(app_state_t *s, const app_event_t *ev, uint64_t now_ms,
             emit(out, out_n, max, r);
         }
         break;
+
+    case APP_EV_DEVICE_CONFIG: {
+        // 电脑端下发的设备设置(提示音档位 / 息屏秒数)。状态机只负责
+        // 息屏计时;提示音与 NVS 落地由 main.c 的 APPLY_DEVICE_CFG 执行器做
+        // (音效需要 bsp_audio,状态机保持无 IDF 依赖)。
+        const uint16_t sec = ev->u.device_config.screen_off_s;
+        if (sec != 0xFFFF) {
+            s->idle_backlight_off_ms = (uint32_t)sec * 1000u;
+            // 面板断电按背光时间推导;背光设成"不熄屏"时面板也不再断电。
+            s->idle_panel_off_ms = s->idle_backlight_off_ms * APP_IDLE_PANEL_FACTOR;
+        }
+        app_action_t a = { .type = APP_ACT_APPLY_DEVICE_CFG };
+        a.u.device_cfg.beep = ev->u.device_config.beep;
+        a.u.device_cfg.screen_off_s = sec;
+        emit(out, out_n, max, a);
+        {
+            app_action_t r = { .type = APP_ACT_UI_REFRESH };
+            emit(out, out_n, max, r);
+        }
+        break;
+    }
 
     case APP_EV_AUDIO_DROP_START:
         if (!s->net_busy) {

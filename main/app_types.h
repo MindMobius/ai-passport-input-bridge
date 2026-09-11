@@ -49,6 +49,16 @@ typedef enum {
     APP_TONE_COUNT,
 } app_tone_t;
 
+// 提示音档位(设备设置,可经电脑端下发/NVS 持久化)。
+// OFF 时 app_sound_play() 直接返回 false —— 调用方的兜底路径会立即开流,
+// 录音流程不受影响(见 main.c 的 START 兜底)。
+typedef enum {
+    APP_BEEP_OFF = 0,       // 完全不响
+    APP_BEEP_SOFT = 1,      // 低音量(默认:桌面上不吵人,又留一点反馈)
+    APP_BEEP_FULL = 2,      // 原始音量(嘈杂环境/演示)
+    APP_BEEP_UNSET = 0xFF,  // 仅供协议帧表示"本帧不改"
+} app_beep_t;
+
 // ---------------- 事件 ----------------
 typedef enum {
     APP_EV_KEY_PRESS = 0,
@@ -61,6 +71,7 @@ typedef enum {
     APP_EV_APPROVAL_REQUEST,
     APP_EV_TRANSCRIPT,
     APP_EV_BRIDGE_STATUS,   // 电脑端心跳(bridge.status:主机名/虚拟声卡/麦克风切换)
+    APP_EV_DEVICE_CONFIG,   // 电脑端下发设备设置(提示音档位 / 息屏秒数)
     APP_EV_AUDIO_DROP_START,
     APP_EV_AUDIO_DROP_END,
     APP_EV_BLE_CONNECTED,   // 链路通:EVENT 特征已被订阅(PTT 可用的充分条件)
@@ -158,6 +169,10 @@ typedef struct {
             char mic[APP_PC_FIELD_MAX];                 // 会话内切换的麦克风目标(mic)
             uint8_t mic_auto;                           // 是否开启"会话内自动切换默认麦克风"
         } bridge_status;                                // BRIDGE_STATUS
+        struct {
+            uint8_t  beep;          // app_beep_t;0xFF = 本帧不改
+            uint16_t screen_off_s;  // 背光熄灭秒数(0 = 不熄屏);0xFFFF = 本帧不改
+        } device_config;                                // DEVICE_CONFIG
     } u;
 } app_event_t;
 
@@ -179,6 +194,7 @@ typedef enum {
     APP_ACT_PLAY_TONE,
     APP_ACT_TIME_SET,        // time_sync_set_epoch(校时落地)
     APP_ACT_SEND_HELLO,      // 通道就绪后上报设备身份(dev_info + proto)
+    APP_ACT_APPLY_DEVICE_CFG,// 设备设置落地(提示音档位 + 息屏秒数 → 运行时 + NVS)
 } app_action_type_t;
 
 // 单事件最多产出的动作数。emit() 满了就静默丢弃,所以这个值必须 ≥ 最长的
@@ -200,6 +216,10 @@ typedef struct {
             uint8_t decision;                           // app_approval_decision_t
         } agent_action;                                 // SEND_AGENT_ACTION
         struct { int64_t epoch; } time_set;             // TIME_SET
+        struct {                                        // APPLY_DEVICE_CFG
+            uint8_t  beep;          // app_beep_t(0xFF = 不变)
+            uint16_t screen_off_s;  // 0 = 不熄屏;0xFFFF = 不变
+        } device_cfg;
     } u;
 } app_action_t;
 
@@ -238,8 +258,15 @@ typedef struct {
 } app_ui_snapshot_t;
 
 // ---------------- 超时常量 ----------------
-#define APP_IDLE_BACKLIGHT_OFF_MS   20000u   // 无按键 → 关背光(息屏,渲染跳过)
-#define APP_IDLE_PANEL_OFF_MS       60000u   // 无按键 → 面板 SLPIN 断电(μA 级)
+// 息屏(可在电脑端控制台改:设备息屏秒数,0 = 不熄屏)。
+// 原值 20s/60s 对桌面场景太短(2026-09-11 用户反馈"老是莫名其妙息屏"),
+// 默认抬到 2 分钟;面板断电按背光时间的 APP_IDLE_PANEL_FACTOR 倍推导。
+#define APP_IDLE_BACKLIGHT_OFF_MS_DEFAULT 120000u
+#define APP_IDLE_PANEL_OFF_MS_DEFAULT     600000u
+#define APP_IDLE_PANEL_FACTOR             5u
+// 兼容既有引用(宿主机测试按默认值断言)
+#define APP_IDLE_BACKLIGHT_OFF_MS APP_IDLE_BACKLIGHT_OFF_MS_DEFAULT
+#define APP_IDLE_PANEL_OFF_MS     APP_IDLE_PANEL_OFF_MS_DEFAULT
 #define APP_TRANSCRIBE_TIMEOUT  30000u   // 转写等待超时
 #define APP_AGENT_RUN_TIMEOUT   90000u   // Agent 执行超时
 #define APP_TICK_MS             100u     // 应用任务心跳

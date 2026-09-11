@@ -1598,11 +1598,53 @@ static void test_dual_idle_last_connect_wins(void) {
 }
 
 // ---- 双通道常开:有线主机在位(USB 供电)不自动息屏 ----
+// ---- 设备设置(息屏秒数):电脑端下发即改阈值,0 = 不熄屏 ----
+// 2026-09-11 用户反馈"老是莫名其妙地息屏":默认 20s 太短,改成 2 分钟,并可下发。
+static void test_device_config_screen_off(void) {
+    reset();
+    fake_mode_set_wired(false);
+    // 默认 2 分钟:50s 无键不熄屏(旧默认 20s 时这里就熄了)
+    s.last_key_ms = now - 50000;
+    reduce(APP_EV_TICK, now);
+    assert(s.screen_on == true);
+
+    // 下发 10 秒:同一条时间线立刻按新阈值生效
+    app_event_t ev = { .type = APP_EV_DEVICE_CONFIG };
+    ev.u.device_config.beep = APP_BEEP_OFF;
+    ev.u.device_config.screen_off_s = 10;
+    app_state_reduce(&s, &ev, now, out, &on);
+    assert(s.idle_backlight_off_ms == 10000);
+    assert(s.idle_panel_off_ms == 10000 * APP_IDLE_PANEL_FACTOR);
+    assert(has_action(APP_ACT_APPLY_DEVICE_CFG));   // 提示音/NVS 由 main.c 执行器落地
+    reduce(APP_EV_TICK, now);
+    assert(s.screen_on == false);
+
+    // 0 = 不熄屏:再久也不熄
+    reset();
+    fake_mode_set_wired(false);
+    app_event_t off = { .type = APP_EV_DEVICE_CONFIG };
+    off.u.device_config.beep = APP_BEEP_UNSET;
+    off.u.device_config.screen_off_s = 0;
+    app_state_reduce(&s, &off, now, out, &on);
+    assert(s.idle_backlight_off_ms == 0 && s.idle_panel_off_ms == 0);
+    s.last_key_ms = now - (APP_IDLE_PANEL_OFF_MS * 10);
+    reduce(APP_EV_TICK, now);
+    assert(s.screen_on == true && s.panel_on == true);
+
+    // 只改提示音(息屏用哨兵):息屏时间必须保持原值,不被重置回默认
+    app_event_t b = { .type = APP_EV_DEVICE_CONFIG };
+    b.u.device_config.beep = APP_BEEP_FULL;
+    b.u.device_config.screen_off_s = 0xFFFF;
+    app_state_reduce(&s, &b, now, out, &on);
+    assert(s.idle_backlight_off_ms == 0);
+}
+
 static void test_wired_no_screen_off(void) {
     reset();
     fake_mode_set_wired(true);             // USB 主机在位:屏幕常亮
     app_event_t t = { .type = APP_EV_TICK };
-    s.last_key_ms = now - 70000;           // 远超 20s 背光 / 60s 面板超时
+    // 远超两级息屏超时(默认背光 2 分钟 / 面板 10 分钟,可用设备设置改)
+    s.last_key_ms = now - (APP_IDLE_PANEL_OFF_MS + 5000);
     app_state_reduce(&s, &t, now, out, &on);
     assert(s.screen_on == true);
     assert(s.panel_on == true);
@@ -1662,6 +1704,7 @@ int main(void) {
     test_dual_active_channel_down_fails_over();
     test_dual_idle_last_connect_wins();
     test_wired_no_screen_off();
+    test_device_config_screen_off();
     printf("test_app_state: all assertions passed\n");
     return 0;
 }

@@ -141,6 +141,32 @@ static bool parse_bridge_status(const cJSON *o, app_event_t *ev) {
     return true;
 }
 
+// 设备设置下行:{"type":"device.config","beep":"soft|full|off","screen_off_s":120}
+// 两个字段都可选:缺省用哨兵(0xFF / 0xFFFF)表示"本帧不改",状态机只改
+// 提到的那个 —— 在控制台调提示音,不该顺手把息屏时间重置回默认。
+static bool parse_device_config(const cJSON *o, app_event_t *ev) {
+    ev->u.device_config.beep = APP_BEEP_UNSET;
+    ev->u.device_config.screen_off_s = 0xFFFF;
+    const cJSON *b = cJSON_GetObjectItemCaseSensitive(o, "beep");
+    if (cJSON_IsString(b)) {
+        if      (strcmp(b->valuestring, "off") == 0)  ev->u.device_config.beep = APP_BEEP_OFF;
+        else if (strcmp(b->valuestring, "soft") == 0) ev->u.device_config.beep = APP_BEEP_SOFT;
+        else if (strcmp(b->valuestring, "full") == 0) ev->u.device_config.beep = APP_BEEP_FULL;
+    } else if (cJSON_IsNumber(b)) {
+        // 数字档位同样接受(0/1/2):脚本/控制台直接给档位更省事
+        const double d = b->valuedouble;
+        if (d >= 0 && d <= APP_BEEP_FULL) ev->u.device_config.beep = (uint8_t)d;
+    }
+    const cJSON *s = cJSON_GetObjectItemCaseSensitive(o, "screen_off_s");
+    if (cJSON_IsNumber(s)) {
+        const double d = s->valuedouble;
+        // 0 = 不熄屏;65535 留给"本帧不改"哨兵,不上屏秒数取到它
+        if (d >= 0 && d <= 65534) ev->u.device_config.screen_off_s = (uint16_t)d;
+    }
+    ev->type = APP_EV_DEVICE_CONFIG;
+    return true;
+}
+
 bool app_protocol_parse(const char *json, size_t len, app_event_t *ev) {
     if (!json || len == 0 || len > APP_PROTO_RX_CAP) return false;
     if (!json_depth_ok(json, len)) return false;   // 深层嵌套:拒绝,保护解析者栈
@@ -154,6 +180,7 @@ bool app_protocol_parse(const char *json, size_t len, app_event_t *ev) {
         else if (strcmp(type->valuestring, "transcript") == 0)           ok = parse_transcript(root, ev);
         else if (strcmp(type->valuestring, "time.set") == 0)             ok = parse_time_set(root, ev);
         else if (strcmp(type->valuestring, "bridge.status") == 0)        ok = parse_bridge_status(root, ev);
+        else if (strcmp(type->valuestring, "device.config") == 0)        ok = parse_device_config(root, ev);
         // 未知 type:丢弃(返回 false,调用方记日志)
     }
     cJSON_Delete(root);

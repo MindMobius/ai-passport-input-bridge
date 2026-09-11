@@ -1,5 +1,6 @@
 // main/nvs_settings.c —— 设置存储实现。
 #include "nvs_settings.h"
+#include "app_types.h"   // APP_BEEP_FULL(档位上限校验)
 #include "esp_log.h"
 #include "nvs.h"
 #include "nvs_flash.h"
@@ -12,6 +13,12 @@ static const char *TAG = "settings";
 // 残留于 NVS 无读取方,无害(factory 清空可除)。
 static const char *K_TZ_HOUR   = "tz_hour";
 static const char *K_LAST_EPOCH = "last_epoch";
+static const char *K_BEEP_LEVEL = "beep_level";
+static const char *K_SCREEN_OFF_S = "screen_off_s";
+
+// 缺省设备设置:提示音"柔和"、背光 2 分钟(桌面场景 20s 太短,2026-09-11 反馈)
+#define BEEP_LEVEL_DEFAULT   1
+#define SCREEN_OFF_S_DEFAULT 120
 
 esp_err_t nvs_settings_init(void) {
     nvs_handle_t h;
@@ -66,6 +73,56 @@ esp_err_t nvs_settings_set_last_epoch(int64_t epoch) {
     esp_err_t e = nvs_open(APP_NS, NVS_READWRITE, &h);
     if (e != ESP_OK) return e;
     e = nvs_set_i64(h, K_LAST_EPOCH, epoch);
+    if (e == ESP_OK) e = nvs_commit(h);
+    nvs_close(h);
+    return e;
+}
+
+// ---- 设备设置(提示音档位 / 息屏秒数)----
+// 读失败/缺省一律回默认值,不把"没存过"当错误(首次开机的正常路径)。
+esp_err_t nvs_settings_get_beep_level(uint8_t *level) {
+    if (level) *level = BEEP_LEVEL_DEFAULT;
+    nvs_handle_t h;
+    if (nvs_open(APP_NS, NVS_READONLY, &h) != ESP_OK) return ESP_OK;
+    uint8_t v = BEEP_LEVEL_DEFAULT;
+    esp_err_t e = nvs_get_u8(h, K_BEEP_LEVEL, &v);
+    nvs_close(h);
+    if (e == ESP_ERR_NVS_NOT_FOUND) return ESP_OK;
+    if (e != ESP_OK) return e;
+    if (v > APP_BEEP_FULL) v = BEEP_LEVEL_DEFAULT;   // 损坏值兜底
+    if (level) *level = v;
+    return ESP_OK;
+}
+
+esp_err_t nvs_settings_set_beep_level(uint8_t level) {
+    if (level > APP_BEEP_FULL) return ESP_ERR_INVALID_ARG;
+    nvs_handle_t h;
+    esp_err_t e = nvs_open(APP_NS, NVS_READWRITE, &h);
+    if (e != ESP_OK) return e;
+    e = nvs_set_u8(h, K_BEEP_LEVEL, level);
+    if (e == ESP_OK) e = nvs_commit(h);
+    nvs_close(h);
+    return e;
+}
+
+esp_err_t nvs_settings_get_screen_off_s(uint16_t *seconds) {
+    if (seconds) *seconds = SCREEN_OFF_S_DEFAULT;
+    nvs_handle_t h;
+    if (nvs_open(APP_NS, NVS_READONLY, &h) != ESP_OK) return ESP_OK;
+    uint16_t v = SCREEN_OFF_S_DEFAULT;
+    esp_err_t e = nvs_get_u16(h, K_SCREEN_OFF_S, &v);
+    nvs_close(h);
+    if (e == ESP_ERR_NVS_NOT_FOUND) return ESP_OK;
+    if (e != ESP_OK) return e;
+    if (seconds) *seconds = v;   // 0 合法 = 不熄屏
+    return ESP_OK;
+}
+
+esp_err_t nvs_settings_set_screen_off_s(uint16_t seconds) {
+    nvs_handle_t h;
+    esp_err_t e = nvs_open(APP_NS, NVS_READWRITE, &h);
+    if (e != ESP_OK) return e;
+    e = nvs_set_u16(h, K_SCREEN_OFF_S, seconds);
     if (e == ESP_OK) e = nvs_commit(h);
     nvs_close(h);
     return e;

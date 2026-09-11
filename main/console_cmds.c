@@ -334,7 +334,66 @@ static int cmd_factory(int argc, char **argv)
 
 // ---- 命令表(REPL 注册与 SYS 执行共用)----
 // 注:模式切换命令(mode)已随双通道常开架构退役(2026-08-28)。
+// ---- beep:提示音档位(off / soft / full;NVS 持久化 + 立即生效)----
+static int cmd_beep(int argc, char **argv)
+{
+    uint8_t cur = APP_BEEP_SOFT;
+    nvs_settings_get_beep_level(&cur);
+    const char *name = cur == APP_BEEP_OFF ? "off" : (cur == APP_BEEP_FULL ? "full" : "soft");
+    if (argc == 1) {
+        out("beep: %s (off|soft|full)\n", name);
+        return 0;
+    }
+    uint8_t lvl;
+    if      (strcmp(argv[1], "off") == 0)  lvl = APP_BEEP_OFF;
+    else if (strcmp(argv[1], "soft") == 0) lvl = APP_BEEP_SOFT;
+    else if (strcmp(argv[1], "full") == 0) lvl = APP_BEEP_FULL;
+    else {
+        out("usage: beep | beep off|soft|full\n");
+        return 1;
+    }
+    nvs_settings_set_beep_level(lvl);
+    app_event_t ev = { .type = APP_EV_DEVICE_CONFIG };
+    ev.u.device_config.beep = lvl;
+    ev.u.device_config.screen_off_s = 0xFFFF;   // 本帧不改息屏
+    app_event_post(&ev);
+    out("beep: %s\n", argv[1]);
+    return 0;
+}
+
+// ---- screen:背光熄灭秒数(0 = 不熄屏;NVS 持久化 + 立即生效)----
+static int cmd_screen(int argc, char **argv)
+{
+    uint16_t cur = 120;
+    nvs_settings_get_screen_off_s(&cur);
+    if (argc == 1) {
+        out("screen: %us (0 = never)\n", (unsigned)cur);
+        return 0;
+    }
+    uint16_t sec;
+    if (strcmp(argv[1], "off") == 0 || strcmp(argv[1], "never") == 0) {
+        sec = 0;
+    } else {
+        char *end = NULL;
+        long v = strtol(argv[1], &end, 10);
+        if (end == argv[1] || *end != '\0' || v < 0 || v > 65534) {
+            out("usage: screen | screen <0-65534>|off\n");
+            return 1;
+        }
+        sec = (uint16_t)v;
+    }
+    nvs_settings_set_screen_off_s(sec);
+    app_event_t ev = { .type = APP_EV_DEVICE_CONFIG };
+    ev.u.device_config.beep = APP_BEEP_UNSET;   // 本帧不改提示音
+    ev.u.device_config.screen_off_s = sec;
+    app_event_post(&ev);
+    out("screen: %us\n", (unsigned)sec);
+    return 0;
+}
+
 static const struct { const char *name; esp_console_cmd_func_t fn; } s_cmds[] = {
+    { "beep",    cmd_beep },
+    { "screen",  cmd_screen },
     { "log",     cmd_log },
     { "time",    cmd_time },
     { "st",      cmd_st },
@@ -416,6 +475,8 @@ static void reg(const char *name, const char *help, const char *hint,
 
 esp_err_t console_cmds_register(void)
 {
+    reg("beep", "提示音档位:beep | beep off|soft|full", NULL, cmd_beep);
+    reg("screen", "息屏秒数:screen | screen <0-65534>|off(0=不熄屏)", NULL, cmd_screen);
     reg("bt", "BT 射频诊断:bt scan | bt dtx [ch](直接测试模式强制发射)", NULL, cmd_bt);
     reg("log", "导出日志环(有 USB 主机时日志进 RAM 环)", NULL, cmd_log);
     reg("st", "系统状态一览(双链路/MTU/掉帧/堆)", NULL, cmd_st);

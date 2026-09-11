@@ -122,6 +122,37 @@ static void test_parse_bridge_status(void) {
     assert(strlen(ev.u.bridge_status.host) == APP_PC_FIELD_MAX - 1);
 }
 
+// 设备设置下行(提示音档位/息屏秒数):字段全可选,缺省用哨兵表示"本帧不改" ——
+// 在控制台只调提示音,不该顺带把息屏时间重置回默认。
+static void test_parse_device_config(void) {
+    app_event_t ev;
+    const char *j = "{\"type\":\"device.config\",\"beep\":\"off\",\"screen_off_s\":0}";
+    assert(app_protocol_parse(j, strlen(j), &ev));
+    assert(ev.type == APP_EV_DEVICE_CONFIG);
+    assert(ev.u.device_config.beep == APP_BEEP_OFF);
+    assert(ev.u.device_config.screen_off_s == 0);        // 0 = 不熄屏(不是哨兵)
+
+    const char *j2 = "{\"type\":\"device.config\",\"beep\":\"full\"}";
+    assert(app_protocol_parse(j2, strlen(j2), &ev));
+    assert(ev.u.device_config.beep == APP_BEEP_FULL);
+    assert(ev.u.device_config.screen_off_s == 0xFFFF);   // 未提及 → 不改
+
+    const char *j3 = "{\"type\":\"device.config\",\"screen_off_s\":300}";
+    assert(app_protocol_parse(j3, strlen(j3), &ev));
+    assert(ev.u.device_config.beep == APP_BEEP_UNSET);
+    assert(ev.u.device_config.screen_off_s == 300);
+
+    const char *j4 = "{\"type\":\"device.config\",\"beep\":1}";    // 数字档位同样接受
+    assert(app_protocol_parse(j4, strlen(j4), &ev));
+    assert(ev.u.device_config.beep == APP_BEEP_SOFT);
+
+    // 非法值(未知档位名 / 超范围秒数)一律落到"不改",不猜
+    const char *j5 = "{\"type\":\"device.config\",\"beep\":\"nonsense\",\"screen_off_s\":99999}";
+    assert(app_protocol_parse(j5, strlen(j5), &ev));
+    assert(ev.u.device_config.beep == APP_BEEP_UNSET);
+    assert(ev.u.device_config.screen_off_s == 0xFFFF);
+}
+
 static void test_parse_rejects(void) {
     app_event_t ev;
     assert(!app_protocol_parse("{\"type\":\"nope\"}", 14, &ev));             // 未知 type
@@ -324,6 +355,7 @@ int main(void) {
     test_parse_transcript();
     test_parse_time_set();
     test_parse_bridge_status();
+    test_parse_device_config();
     test_parse_rejects();
     test_parse_deep_nesting_rejected();
     test_parse_long_line_truncation();
