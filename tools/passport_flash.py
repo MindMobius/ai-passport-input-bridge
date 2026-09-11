@@ -1,5 +1,12 @@
 #!/usr/bin/env python3
-"""Safe Windows helper for AI Passport backup and segmented flashing."""
+"""Safe Windows helper for AI Passport backup / flashing.
+
+用法(设备用 USB 线连好):
+  python tools/passport_flash.py info          # 读芯片/MAC(自动发现端口)
+  python tools/passport_flash.py backup        # 备份分区表/NVS/cardid/recovery
+  python tools/passport_flash.py app           # ★只更新应用分区 0x10000
+  python tools/passport_flash.py flash         # 分段烧 bootloader+分区表+应用
+"""
 from __future__ import annotations
 
 import argparse
@@ -22,8 +29,21 @@ def run(cmd: list[str]) -> None:
     subprocess.run(cmd, check=True)
 
 
+def _needs_usb_reset(port: str) -> bool:
+    """ESP32-C3 原生 USB-Serial-JTAG(设备接口路径)必须显式 usb-reset。
+
+    否则 esptool 会报 "Wrong boot mode detected (0xa)":这条路径不是普通 UART,
+    默认的 DTR/RTS 复位序列对 USB-Serial-JTAG 无效(2026-09-11 真机实测)。
+    """
+    p = (port or "").lower()
+    return "vid_303a" in p and "pid_1001" in p
+
+
 def esptool(port: str, baud: int, *args: str) -> None:
-    run([PY, "-m", "esptool", "--chip", "esp32c3", "--port", port, "--baud", str(baud), *args])
+    cmd = [PY, "-m", "esptool", "--chip", "esp32c3", "--port", port, "--baud", str(baud)]
+    if _needs_usb_reset(port):
+        cmd += ["--before", "usb-reset"]
+    run(cmd + list(args))
 
 
 def read_flash(port: str, baud: int, offset: int, size: int, output: Path) -> None:
@@ -78,20 +98,68 @@ def flash_segmented(port: str, baud: int) -> None:
     print("Segmented flash complete. NVS/cardid/recovery were not written.")
 
 
+def flash_app_only(port: str, baud: int) -> None:
+    """只写 0x10000 应用分区:不动 bootloader / 分区表 / NVS / cardid / recovery。
+
+    日常固件迭代用这个(设备已配网、cardid 已写入时尤其重要)。
+    """
+    app = SEGMENTS / "FoloToy-AI-Passport.bin"
+    if not app.is_file():
+        raise FileNotFoundError(f"{app} 不存在,先跑 build-firmware.cmd")
+    if app.stat().st_size > 0x300000:
+        raise ValueError(f"应用镜像 {app.stat().st_size} 超过 factory 分区 0x300000")
+    esptool(
+        port, baud, "write_flash", "--flash_mode", "dio", "--flash_freq", "80m",
+        "--flash_size", "8MB", "0x10000", str(app),
+    )
+    print("App-only flash complete (0x10000). "
+          "bootloader/partition-table/NVS/cardid/recovery untouched.")
+
+
+def resolve_port(explicit: str | None) -> str:
+    """--port 省略时自动发现:优先 USB-Serial-JTAG 设备接口路径(绕开坏 COM 口)。"""
+    if explicit:
+        return explicit
+    sys.path.insert(0, str(ROOT / "companion"))
+    try:
+        from serial_transport import discover_direct_cdc_path
+
+        direct = discover_direct_cdc_path()
+        if direct:
+            print(f"[flash] 自动发现设备接口路径: {direct}")
+            return direct
+    except Exception as exc:
+        print(f"[flash] 设备接口路径探测失败({exc}),改用 COM 扫描", file=sys.stderr)
+    try:
+        from serial.tools import list_ports
+
+        for port in list_ports.comports():
+            hay = f"{port.description} {port.hwid}".upper()
+            if "303A" in hay or "JTAG" in hay:
+                print(f"[flash] 自动发现串口: {port.device}")
+                return port.device
+    except Exception:
+        pass
+    raise RuntimeError("未找到 Passport:插好 USB 线,或用 --port 指定设备接口路径/COM 口")
+
+
 def main() -> int:
     ap = argparse.ArgumentParser()
-    ap.add_argument("--port", required=True, help="Windows COM port, e.g. COM5")
+    ap.add_argument("--port", help="省略=自动发现(设备接口路径优先,其次 COM 口)")
     ap.add_argument("--baud", type=int, default=460800)
-    ap.add_argument("action", choices=("info", "backup", "backup-full", "flash"))
+    ap.add_argument("action", choices=("info", "backup", "backup-full", "flash", "app"))
     args = ap.parse_args()
     try:
+        port = resolve_port(args.port)
         if args.action == "info":
-            esptool(args.port, args.baud, "flash_id")
-            esptool(args.port, args.baud, "read_mac")
+            esptool(port, args.baud, "flash_id")
+            esptool(port, args.baud, "read_mac")
         elif args.action in ("backup", "backup-full"):
-            backup(args.port, args.baud, args.action == "backup-full")
+            backup(port, args.baud, args.action == "backup-full")
+        elif args.action == "app":
+            flash_app_only(port, args.baud)
         else:
-            flash_segmented(args.port, args.baud)
+            flash_segmented(port, args.baud)
     except (subprocess.CalledProcessError, OSError, ValueError, RuntimeError) as exc:
         print(f"ERROR: {exc}", file=sys.stderr)
         return 1

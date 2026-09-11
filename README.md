@@ -46,6 +46,11 @@
 仍有历史包袱(`wechat_bridge.py` / `wechat_config.json` / `doctor_wechat.py`),默认值也偏微信输入法。
 后续计划:抽 `profiles/`(wechat-ime / windows-voice / …)+ 模块改名 `bridge_*`,旧名留兼容 shim。
 
+## 烧录 / 恢复
+
+换设备或重刷固件看 **[docs/FLASHING.md](docs/FLASHING.md)**:备份 → 构建 → 只烧应用分区
+(`tools/passport_flash.py app`,不动 cardid/recovery/NVS/分区表)。
+
 ## 许可与致谢
 
 MIT。来源于:

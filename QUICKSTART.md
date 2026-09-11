@@ -48,6 +48,11 @@
 
 设备端只烧了按键策略;所有和输入法/系统对接的事都在电脑上。所以设备单独跑是没用的。
 
+## 换设备 / 重刷固件
+
+看 [docs/FLASHING.md](docs/FLASHING.md):先 `tools/passport_flash.py backup` 备份,
+构建用 `build-firmware.cmd`,日常只烧应用分区 `tools/passport_flash.py app`。
+
 ## 进阶(可选)
 
 - 开机自启:把 `open-console.cmd` 的快捷方式放进 `shell:startup`(`Win+R` 输入 `shell:startup`),开机后控制台在后台跑,设备连上会自动重连。
