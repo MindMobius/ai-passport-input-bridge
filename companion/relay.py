@@ -351,6 +351,19 @@ class BleakTransport:
         # macOS: MTU 由 CoreBluetooth 与设备协商(设备 ATT_PREFERRED_MTU=517),
         # 无需也不支持中央侧指定; 长载荷 write_gatt_char 自动按 MTU 分包。
 
+    @property
+    def mtu_size(self):
+        """中央侧看到的协商 ATT MTU(诊断用;取不到返回 0)。
+
+        与设备 `st` 里的 mtu 对照,就能判断"MTU 没谈上去"是发生在哪一侧 ——
+        实测同一台设备不同连接会拿到 259 / 517 两种结果,而 MTU 决定每块音频
+        要拆 4 片还是 2 片,直接关系到 BLE 丢帧率。
+        """
+        try:
+            return int(self._client.mtu_size)
+        except Exception:
+            return 0
+
     async def _ensure_encrypted_link(self, retries=2):
         """Windows: 固件 CTRL 特征要求加密链路(WRITE_ENC)。
 
@@ -479,6 +492,9 @@ class Relay:
         try:
             await t.connect(device_addr, on_disconnect=self._on_disconnected)
             print("[relay] 已连接, 订阅 EVENT/AUDIO")
+            mtu = getattr(t, "mtu_size", None)
+            if mtu:
+                print(f"[ble] 协商 ATT MTU = {mtu}(设备侧 st 的 mtu 应为同一值)")
             if self._on_phase:
                 self._on_phase("connected")
             await t.start_notify(EVENT_UUID, self._cb("event"))
