@@ -204,6 +204,15 @@ never talks to the network beyond `127.0.0.1`.
 | 设备设置 | 设备提示音档位（关闭 / 柔和 / 原始）与背光熄灭秒数（0 = 不熄屏）；保存并重连后由桥接下发，设备写 NVS，断电重启仍保留 |
 | 运行日志 | Bridge 的 stdout / stderr 实时尾部 |
 
+Device console（USB 串口 / SYS 命令面）另有两组设备侧设置，改完立即生效并写 NVS：
+
+```
+beep | beep off|soft|full      提示音档位
+screen | screen <秒>|off       背光熄灭秒数（0 = 不熄屏；面板断电按 ×5 推导）
+time | time set <epoch> | time tz <±hhh>
+st | log [offset] | rst | reboot | factory
+```
+
 Why the default microphone keeps working:
 
 - The Passport needs the system default recorder to be the virtual cable while
