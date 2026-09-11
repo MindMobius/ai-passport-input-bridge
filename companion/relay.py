@@ -958,6 +958,19 @@ class Relay:
             print("[status] bridge.status 下行已恢复")
         return True
 
+    async def send_device_config(self, info):
+        """下行 device.config(设备设置:提示音档位 / 息屏秒数)。
+
+        每次连接成功下发一次即可(设备侧写 NVS,断电重启后沿用)。尽力而为:
+        未连接/写失败返回 False,不抛 —— 设备设置失败不该影响语音主路径。
+        """
+        try:
+            await self._send_ctrl({"type": "device.config", **info})
+        except Exception as e:
+            print(f"[cfg] device.config 下行失败(设备未连接?): {e}", file=sys.stderr)
+            return False
+        return True
+
     async def _sync_time(self):
         """下行 wall-clock 校时(UTC epoch 秒)。
 

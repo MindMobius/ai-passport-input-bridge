@@ -35,6 +35,9 @@ DEFAULTS: dict[str, Any] = {
     "connect_timeout_s": 5.0,
     "session_timeout_s": 3.0,
     "log_audio_frames": True,
+    # 设备侧设置(连接后由桥接下发,见 relay.send_device_config)
+    "device_beep": "soft",         # off | soft | full(设备提示音档位)
+    "device_screen_off_s": 120,    # 设备背光熄灭秒数(0 = 不熄屏)
 }
 
 
@@ -68,6 +71,11 @@ def _validate(cfg: dict[str, Any]) -> None:
         raise ValueError("output_sample_rate 必须大于 0")
     if cfg.get("output_channels") is not None and int(cfg["output_channels"]) <= 0:
         raise ValueError("output_channels 必须大于 0")
+    if str(cfg.get("device_beep", "soft")) not in ("off", "soft", "full"):
+        raise ValueError("device_beep 必须是 'off' / 'soft' / 'full'")
+    screen_s = int(cfg.get("device_screen_off_s", 120))
+    if screen_s < 0 or screen_s > 65534:
+        raise ValueError("device_screen_off_s 必须在 0..65534 之间(0 = 不熄屏)")
 
 
 def write_example_config(path: str | os.PathLike[str] | None = None) -> Path:

@@ -201,6 +201,7 @@ never talks to the network beyond `127.0.0.1`.
 | 状态监控 | 连接相位、电池、链路、丢帧、语音状态、最后按键、事件流 |
 | 按键映射 | 就地编辑/录制每个手势触发的电脑按键（与“参数调整”同源，改一处两处同步） |
 | 设备信息 | 设备 `device.hello` 上报的型号/MCU/Flash/显示/音频/USB ID/序列号/固件版本（落盘 `build/wechat/device.json`） |
+| 设备设置 | 设备提示音档位（关闭 / 柔和 / 原始）与背光熄灭秒数（0 = 不熄屏）；保存并重连后由桥接下发，设备写 NVS，断电重启仍保留 |
 | 运行日志 | Bridge 的 stdout / stderr 实时尾部 |
 
 Why the default microphone keeps working:

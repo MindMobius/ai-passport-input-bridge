@@ -23,5 +23,7 @@
   "connect_retry_delay_s": 2.0,
   "connect_retry_max_s": 30.0,
   "mic_auto_switch": true,
-  "mic_switch_target": "CABLE Output"
+  "mic_switch_target": "CABLE Output",
+  "device_beep": "soft",
+  "device_screen_off_s": 120
 }

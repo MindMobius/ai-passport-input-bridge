@@ -128,6 +128,14 @@ def parse_device_status(text: str) -> dict:
     return result
 
 
+def device_config_payload(cfg: dict) -> dict:
+    """设备侧设置(提示音档位 / 背光熄灭秒数):连接后由桥接下发一次。"""
+    return {
+        "beep": str(cfg.get("device_beep", "soft")),
+        "screen_off_s": int(cfg.get("device_screen_off_s", 120)),
+    }
+
+
 def client_status_payload(cfg: dict) -> dict:
     """设备屏幕"连接信息"行要的 PC 侧状态(主机名/虚拟声卡/麦克风切换)。"""
     auto = bool(cfg.get("mic_auto_switch", True))
@@ -141,19 +149,29 @@ def client_status_payload(cfg: dict) -> dict:
     }
 
 
-async def client_status_loop(relay, cfg: dict, interval_s: float = 2.0) -> None:
+async def client_status_loop(relay, cfg: dict, state: dict, interval_s: float = 2.0) -> None:
     """周期下发 bridge.status(设备端 6s 无心跳即视为 PC 离线)。
 
     未连接时 send_client_status 返回 False 且不抛;这里继续下一轮,
     设备重连后自动恢复,不需要重连逻辑配合。
+
+    state["cfg_pending"] 由 on_phase("connected") 置位:每次(重)连成功后
+    补发一次设备设置(提示音/息屏),发成功即清位。
     """
     payload = client_status_payload(cfg)
+    device_cfg = device_config_payload(cfg)
     announced = False
     while True:
-        if await relay.send_client_status(payload) and not announced:
-            announced = True
-            print(f"[status] 电脑端心跳已下发(bridge.status):PC={payload['host']} "
-                  f"声卡={payload['sink'] or '--'}")
+        if await relay.send_client_status(payload):
+            if not announced:
+                announced = True
+                print(f"[status] 电脑端心跳已下发(bridge.status):PC={payload['host']} "
+                      f"声卡={payload['sink'] or '--'}")
+            if state.get("cfg_pending"):
+                if await relay.send_device_config(device_cfg):
+                    state["cfg_pending"] = False
+                    print(f"[cfg] 设备设置已下发:提示音={device_cfg['beep']} "
+                          f"息屏={device_cfg['screen_off_s']}s")
         await asyncio.sleep(interval_s)
 
 
@@ -188,10 +206,13 @@ async def run_bridge(cfg: dict, device_addr: str | None, dry_run: bool, status_f
     status_path = status_file or str(Path(__file__).resolve().parent.parent / "build" / "wechat" / "status.json")
     status = BridgeStatus(status_path, cfg)
     transport = build_transport(cfg)
+    cfg_state = {"cfg_pending": False}   # 设备设置下发状态(见 client_status_loop)
 
     def phase(name: str) -> None:
         status.update(phase=name, connected=name == "connected")
         status.event("phase", name)
+        if name == "connected":
+            cfg_state["cfg_pending"] = True   # 每次(重)连补发一次设备设置
 
     def key_action(action: str) -> None:
         status.update(last_key={"action": action, "time": time.time()})
@@ -267,7 +288,7 @@ async def run_bridge(cfg: dict, device_addr: str | None, dry_run: bool, status_f
         print("[bridge] dry-run: 不会写入真实虚拟声卡，也不会注入真实按键")
 
     status_task = asyncio.create_task(poll_device_status(transport, status))
-    status_push_task = asyncio.create_task(client_status_loop(relay, cfg))
+    status_push_task = asyncio.create_task(client_status_loop(relay, cfg, cfg_state))
     # connect_retries=0(默认)= 无限重试:设备没开机/出门了也不该让桥接退出,
     # 它回来就自动接上;要停就点控制台的"停止 Bridge"。
     attempts = int(cfg.get("connect_retries", 0))
