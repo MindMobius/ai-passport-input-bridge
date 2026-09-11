@@ -344,8 +344,15 @@ class BleakTransport:
 
     async def connect(self, address, on_disconnect=None):
         from bleak import BleakClient
+        # winrt[use_cached_services]=False → 每次连接都用 UNCACHED 重新枚举 GATT
+        # 服务表。原因:Windows 会缓存每台设备的服务树,而配对流程会让链路重连
+        # 一次,缓存可能不完整 —— 实机反复出现
+        # `Characteristic 0000A2B2-... was not found!` 导致每次连接失败重试
+        # (2026-09-11)。代价是每次连接慢 1~2 秒,换来连得上。
+        # 其他平台会忽略 winrt 参数。
         self._client = BleakClient(address, timeout=30,
-                                   disconnected_callback=on_disconnect)
+                                   disconnected_callback=on_disconnect,
+                                   winrt={"use_cached_services": False})
         await self._client.connect()
         await self._ensure_encrypted_link()
         # macOS: MTU 由 CoreBluetooth 与设备协商(设备 ATT_PREFERRED_MTU=517),
