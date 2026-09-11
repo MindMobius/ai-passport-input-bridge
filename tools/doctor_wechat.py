@@ -220,6 +220,66 @@ def check_ble(rep: Report, scan: bool) -> tuple[bool, bool]:
     return True, False
 
 
+def _capture_endpoint_names() -> dict[str, str]:
+    """endpoint id -> 友好名(用于把默认设备 ID 翻成人看得懂的名字)。"""
+    try:
+        import warnings
+
+        warnings.filterwarnings("ignore")
+        from pycaw.pycaw import AudioUtilities
+
+        out = {}
+        for dev in AudioUtilities.GetAllDevices():
+            did = str(getattr(dev, "id", "") or "")
+            if ".1." in did:                      # 采集端点
+                try:
+                    out[did.lower()] = dev.FriendlyName or "?"
+                except Exception:
+                    out[did.lower()] = "?"
+        return out
+    except Exception:
+        return {}
+
+
+def check_default_mic(rep: Report) -> None:
+    """★ 关键检查:默认录音设备有没有被上次会话留在虚拟声卡上。
+
+    本项目的麦克风切换是"会话内临时切 CABLE Output,结束还原"。如果进程被强杀
+    或断电,残留可能留在系统默认设备上,导致用户自己的麦克风"听起来没声音"。
+    这里主动发现,并给出还原命令。
+    """
+    try:
+        import sys as _sys
+
+        _sys.path.insert(0, str(ROOT / "companion"))
+        from win_default_mic import make_switcher
+    except Exception as exc:
+        rep.add("默认麦克风", WARN, f"跳过(无法加载切换模块: {exc})", "")
+        return
+    sw = make_switcher({"mic_auto_switch": True, "mic_switch_target": "CABLE Output"})
+    if not getattr(sw, "available", False):
+        rep.add("默认麦克风", WARN, "跳过(非 Windows 或缺少 pycaw/comtypes)", "")
+        return
+    try:
+        cur = sw.current_defaults()
+        cable = (sw.find_capture_endpoint("CABLE Output") or "").lower()
+    except Exception as exc:
+        rep.add("默认麦克风", WARN, f"读取失败: {exc}", "")
+        return
+    names = _capture_endpoint_names()
+    stuck = [rid for rid in cur.values() if cable and str(rid).lower() == cable]
+    if stuck:
+        rep.add("默认麦克风", FAIL,
+                f"默认录音设备仍指向 CABLE Output({len(stuck)}/3 个角色)—— 你自己的麦克风会听起来没声音",
+                "还原:.venv\\Scripts\\python.exe tools\\restore-default-mic.py"
+                "(或跑控制台的\"恢复默认麦克风\")")
+        return
+    shown = []
+    for rid in sorted(set(cur.values())):
+        shown.append(names.get(str(rid).lower(), str(rid)[:38]))
+    rep.add("默认麦克风", OK, "当前 = " + "; ".join(shown))
+
+
 def check_console(rep: Report) -> None:
     listening = False
     try:
@@ -275,6 +335,7 @@ def main() -> int:
     usb = check_usb(rep)
     ble_radio, ble_found = check_ble(rep, scan=not args.no_scan)
     check_console(rep)
+    check_default_mic(rep)
     check_wechat_ime(rep)
 
     if args.json:
