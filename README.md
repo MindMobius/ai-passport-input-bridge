@@ -42,6 +42,17 @@
 | 固件主机测试 | `tests/` | 状态机/协议/音频/USB 链路的 x86 host 测试(不依赖硬件) |
 | 硬件实测记录 | `docs/` | 硬件调试、性能/内存复核、代码审查记录 |
 
+根目录下的入口脚本(都是双击即用):
+
+| 脚本 | 用途 |
+|---|---|
+| `setup.cmd` | **新电脑第一件事**:自检 + 装 Python/依赖/虚拟声卡 + 打开控制台 |
+| `doctor.cmd` | 体检:Python、依赖、虚拟声卡、蓝牙、设备、控制台、输入法逐项给结论 |
+| `open-console.cmd` | 打开控制台(127.0.0.1:8790),平时用这个 |
+| `run-usb.cmd` / `run-ble.cmd` | 不开控制台、前台直接跑桥接(调试用,能看到实时日志) |
+| `build-firmware.cmd` | 在 WSL 里编译固件并校验(需要 ESP-IDF) |
+| `list-audio.cmd` / `mic-level-test.cmd` / `test-virtual-mic.cmd` / `simulate.cmd` | 音频自检:列设备 / 麦克风电平 / 虚拟声卡回环 / 全流程模拟 |
+
 ## 已验证 / 未验证
 
 **已实测**:固件可编译并通过 `tools/verify_firmware.py` 校验;应用分区可烧录且不动
