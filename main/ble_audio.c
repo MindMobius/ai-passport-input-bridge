@@ -8,6 +8,7 @@
 #include "ble_audio.h"
 #include <stdbool.h>
 #include <string.h>
+#include "adpcm.h"   // ADPCM_BLOCK_BYTES:MTU 日志里折算"每块拆几片"
 
 // ==================== 分片打包纯函数(契约见 ble_audio.h) ====================
 
@@ -348,6 +349,23 @@ static int gap_event_handler(struct ble_gap_event *event, void *arg) {
         }
         break;
 
+    case BLE_GAP_EVENT_MTU: {
+        // ATT MTU 协商结果(每次连接只协商一次,规范如此)—— 音频分片数直接
+        // 由它决定:517 → 每块 2 片;259 → 每块 4 片(片数翻倍 = NOTIFY_TX
+        // 流控变紧,正是 BLE 丢帧的主因之一)。这里落日志是因为实测同一台设备
+        // 不同连接的协商值不一样(2026-09-11:一次会话 259、事后 517),
+        // 不记下来根本分不清"丢帧是链路差"还是"MTU 没谈上去"。
+        const uint16_t mtu = event->mtu.value;
+        const uint16_t body = (mtu > PAYLOAD_OVERHEAD + AUDIO_CHUNK_HDR)
+                            ? (uint16_t)(mtu - PAYLOAD_OVERHEAD - AUDIO_CHUNK_HDR) : 1;
+        const unsigned chunks = (ADPCM_BLOCK_BYTES + body - 1) / body;
+        ESP_LOGI(TAG, "ATT MTU = %u(每块 ADPCM 拆 %u 片)", (unsigned)mtu, chunks);
+        if (mtu < 500) {
+            ESP_LOGW(TAG, "MTU 偏小(期望 517):本连接 BLE 吞吐余量会明显变薄");
+        }
+        break;
+    }
+
     case BLE_GAP_EVENT_DISCONNECT:
         ESP_LOGI(TAG, "断开 (reason %d)", event->disconnect.reason);
         if (event->disconnect.conn.conn_handle == s_conn) {  // NimBLE 5.5: 句柄移入 conn 描述
@@ -555,7 +573,17 @@ int ble_audio_init(void) {
 // 唯一调用者是 audio_streamer 的 ble_worker(单任务),故发送暂存可用静态缓冲。
 // 帧头是"只丢片不丢帧"的前提:重组端按字节对齐,缺片若无标记会让此后所有块
 // 永久错位;有 [块序号][片序号] 后 Mac 只丢受损块,下一块自动重新对齐。
-static uint8_t s_audio_tx[256];        // ATT 载荷上限 = MTU-3,MTU ≤ 256(sdkconfig 首选值)
+// ATT 载荷上限 = MTU-3;协商上限由 CONFIG_BT_NIMBLE_ATT_PREFERRED_MTU 决定
+// (sdkconfig.defaults = 517 → 单片 514B)。
+//
+// 这里曾固定 256B(MTU ≤ 256 时代的尺寸),而 sdkconfig 早已升到 517 —— 结果
+// 每片被静默截到 254B 数据:一个 804B 的 ADPCM 块要拆 4 片而不是 2 片,NOTIFY_TX
+// 逐片流控下每块占用 4 个连接事件,100ms 采集预算被挤爆。实测症状是 BLE 会话
+// 稳定丢 ~18% 帧(设备自报源端丢 3 块 / PC 侧差 12 块),而 `st` 里 MTU 显示 517、
+// 一切"看起来正常"——2026-09-11 对照 PC 侧收到的分片长度(256B/44B,恰好 =
+// 256-2 与 806-3×254)才定位到这里。
+// MSYS 池已按 640B/块配置(514B 载荷单片一块),放大本缓冲不需要再动配置。
+static uint8_t s_audio_tx[BLE_ATT_MTU_LOCAL - PAYLOAD_OVERHEAD];
 static uint8_t s_audio_blk_seq = 0;    // 块序号,每帧 ++(mod 256)
 
 int ble_audio_notify_audio(const uint8_t *frame, size_t len) {

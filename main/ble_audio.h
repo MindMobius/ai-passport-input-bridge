@@ -27,6 +27,14 @@ extern "C" {
 // ---- 常量 ----
 #define ATT_MTU_MIN        23     // BLE 规范最小 ATT MTU(低于此值非法)
 #define PAYLOAD_OVERHEAD   3      // ATT 载荷开销(opcode 1 + handle 2);载荷上限 = MTU-3
+// 本端可协商到的最大 ATT MTU(= sdkconfig 的 CONFIG_BT_NIMBLE_ATT_PREFERRED_MTU)。
+// 发送暂存按它开:固定尺寸写死会在 MTU 变大后静默截断分片(见 ble_audio.c
+// s_audio_tx 注释)。宿主机测试无 sdkconfig,退回同一常数。
+#ifdef CONFIG_BT_NIMBLE_ATT_PREFERRED_MTU
+#define BLE_ATT_MTU_LOCAL  CONFIG_BT_NIMBLE_ATT_PREFERRED_MTU
+#else
+#define BLE_ATT_MTU_LOCAL  517
+#endif
 // AUDIO 分片帧头:[uint8 块序号(每帧 ++)][uint8 片序号 0..127 | 0x80 末片标志]。
 // 为什么需要:重组按字节对齐,中间少一片会让此后所有块错位(静默毁掉整个会话)。
 // 有帧头后 Mac 端能识别缺片、只丢该块并在下一块重新对齐,才敢"只丢片不丢帧"。
