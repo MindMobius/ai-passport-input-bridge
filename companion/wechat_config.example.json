@@ -12,7 +12,7 @@
   "enter_hotkey": "enter",
   "clear_hotkey": "ctrl+a,delete",
   "cancel_hotkey": "escape",
-  "target_title_regex": "(Codex|ChatGPT)",
+  "target_title_regex": "",
   "require_target_for_paste": true,
   "require_target_for_enter": true,
   "connect_timeout_s": 5.0,

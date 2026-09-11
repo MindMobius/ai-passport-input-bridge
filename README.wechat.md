@@ -84,6 +84,11 @@ Important fields:
 }
 ```
 
+`target_title_regex` 是**可选**的前台窗口护栏:留空(示例配置的默认值)表示"粘到当前焦点窗口,
+不挑应用";填了正则则 DOWN 粘贴 / OK 回车只在标题匹配的窗口里执行,其余情况直接拒绝并提示
+(适合"只在 Codex/ChatGPT 里落字"的用法)。`require_target_for_paste` /
+`require_target_for_enter` 控制这条护栏对粘贴 / 回车各自是否生效。
+
 If WeChat IME uses `Ctrl+Shift+Win`, set:
 
 ```json
