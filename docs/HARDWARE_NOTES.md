@@ -128,3 +128,29 @@
 .venv\Scripts\python.exe tools\mic-level-test.py --device "Beoplay A1" --seconds 6     # USB 那条
 .venv\Scripts\python.exe tools\mic-level-test.py --device "2- Beoplay A1" --seconds 6   # 蓝牙那条
 ```
+
+## 为什么声音设置里会冒出好几条 `… Beplay A1` 麦克风
+
+Windows 对**同名端点**会自动加序号(`2-`、`3-`),它们来自**不同通路**,不是重复的 bug:
+
+| 声音设置里的名字 | 来源(父设备) | 实测 |
+|---|---|---|
+| `耳机式麦克风 (Beplay A1)`(无序号) | 旧的 **USB** 端点,`NotPresent`(上次 USB 重新枚举留下的孤儿) | 不出现/不可用 |
+| `耳机式麦克风 (2- Beplay A1)` | 当前 **USB**:`USB\VID_0CD4&PID_1004&MI_00` | peak=1、波动 0 → **无数据** |
+| `耳机式麦克风 (3- Beplay A1)` | **蓝牙 HFP**:`BTHHFENUM\BthHFPAudio` | peak=1810、波动 1745 → **正常** |
+
+判定方法(看父设备即可知道是 USB 还是蓝牙):
+
+```powershell
+Get-PnpDevice -InstanceId "SWD\MMDEVAPI\{0.0.1.00000000}.{A39885E9-AB9E-4543-AB7F-76AE18FB83E2}" |
+  ForEach-Object { (Get-PnpDeviceProperty -InstanceId $_.InstanceId -KeyName DEVPKEY_Device_Parent).Data }
+```
+
+### 清理成一条(建议保留蓝牙那条)
+
+1. 不用 USB 麦克风就**拔掉 USB 线**,USB 那几条会变成"未插入";
+2. 设置 → 系统 → 声音 → **所有声音设备** → 把 USB 那条(`2- …`)和孤儿(`…` 无序号)选 **禁用/移除**;
+3. 孤儿端点彻底删掉:设备管理器 → 查看 → **显示隐藏的设备** → 音频输入和输出 →
+   卸载灰色的 `耳机式麦克风 (Beplay A1)`;
+4. 蓝牙如果也重复了:设置 → 蓝牙和其他设备 → **移除 Beplay A1** → 重新配对一次;
+5. 默认输入保留 **`3- Beplay A1`(蓝牙)** —— 实测唯一能拾音的那条。
