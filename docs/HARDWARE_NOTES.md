@@ -154,3 +154,38 @@ Get-PnpDevice -InstanceId "SWD\MMDEVAPI\{0.0.1.00000000}.{A39885E9-AB9E-4543-AB7
    卸载灰色的 `耳机式麦克风 (Beplay A1)`;
 4. 蓝牙如果也重复了:设置 → 蓝牙和其他设备 → **移除 Beplay A1** → 重新配对一次;
 5. 默认输入保留 **`3- Beplay A1`(蓝牙)** —— 实测唯一能拾音的那条。
+
+## 官方文档怎么说(2026-09-12 查证)
+
+B&O 支持库里的原文(用它们的支持站 API 检索得到):
+
+- **How do I know which Beoplay/Beosound A1 variant I have?**
+  <https://support.bang-olufsen.com/hc/en-us/articles/360047337631>
+  > "The **Beoplay A1** includes a **USB-C charging input** as well as a mini-jack Line-input."
+  —— 初代 Beoplay A1,B&O 只把 USB-C 描述成**充电输入**;文档里的"音频输入"是 **3.5 mm line-in**
+  (那是把声音**送进**音箱,不是麦克风)。
+- **How do I resolve issues with the microphone on my Beoplay A1?**
+  <https://support.bang-olufsen.com/hc/en-us/articles/5064092383121>
+  全文只讲两件事:别挡住麦克风、以及**关机再开机重建蓝牙连接** —— 也就是说
+  **这颗麦克风在官方定义里是"蓝牙免提(speakerphone)"用的**,通篇没有 USB 音频输入这回事。
+- A1 系列所有"麦克风/通话"文章(含 Beosound A1 2nd/3rd Gen 的静音键说明)都是**蓝牙通话**场景;
+  官方从未把 USB 列为麦克风通路。
+
+## 结论(跨平台复现 + 官方文档)
+
+- **跨平台复现**:同一台 A1,Windows 与 MacBook 通过 USB-C 连接,麦克风都是无声 →
+  不是 Windows、不是本项目的调试。
+- **实测**:USB 采集端点存在、驱动正常、数据包准时,但内容恒为 ~89 LSB(0.27% FS)、对说话无响应;
+  USB **播放**正常;蓝牙 HFP 采集正常(peak 1810)。
+- **官方文档**:USB-C 被定义为充电口;麦克风被定义为蓝牙免提通路。
+- ⇒ 合理解释:**该型号/固件的 USB 音频实现了"播放",采集端点是空壳**;USB 麦克风不是受支持的能力。
+  (社区侧:能检索到的开放源——Stack Exchange 的 Super User / Ask Different、GitHub Issues——
+  没有找到相应报告;Reddit / B&O 论坛因反爬或登录墙无法检索,不能据此断言"没人反馈"。)
+
+## 建议
+
+1. **麦克风用蓝牙**(设计用途,实测可用);USB 那条在设备管理器里禁用掉,避免系统默认选中它。
+2. 想推动 USB 麦克风支持:用 B&O App 检查固件版本,并向 B&O 支持开单,附上可复现证据
+   ("USB-C 连接时枚举出 USB 音频采集端点,但恒为 0.27% FS 恒定值;同一设备蓝牙麦克风正常;
+   在 Windows 与 macOS 上一致")。
+3. 若想确认真是该型号的普遍行为:用**另一台同型号 A1** 在同一台电脑上测 USB 麦克风。
