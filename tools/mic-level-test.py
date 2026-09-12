@@ -35,6 +35,12 @@ def main() -> int:
                     print(f"  [{i:3d}] {d['name']}", file=sys.stderr)
             print("\n提示:名字要写全/写对,例如 --device \"Beoplay A1\"", file=sys.stderr)
             return 2
+        if len(hits) > 1:
+            print(f"匹配到 {len(hits)} 个输入端点:")
+            for i in hits:
+                print(f"  [{i:3d}] {sd.query_devices(i)['name']}")
+            print(f"→ 使用第一个 [{hits[0]}];要测另一条请写更精确的名字"
+                  f"(例如 --device \"2- Beoplay A1\" 指蓝牙那条)\n")
         dev = hits[0]
     else:
         dev = sd.default.device[0]
@@ -46,6 +52,7 @@ def main() -> int:
 
     block = int(rate * 0.5)
     peak_all = 0
+    peaks: list[int] = []
     bars_low = 0
     with sd.RawInputStream(device=dev, samplerate=rate, channels=1, dtype="int16",
                            blocksize=block) as st:
@@ -54,6 +61,7 @@ def main() -> int:
             a = array.array("h", bytes(data))
             peak = max(abs(x) for x in a) if a else 0
             peak_all = max(peak_all, peak)
+            peaks.append(peak)
             level = min(40, peak * 40 // 3000)
             if peak < 300:
                 bars_low += 1
@@ -66,7 +74,14 @@ def main() -> int:
     elif peak_all > 300:
         print("结论: 有信号但很弱(贴近说话再试一次;或设备音量偏小)")
     else:
-        print("结论: 基本静音 —— 麦克风没有拾音(设备侧静音/卡住,或系统默认设备不对)")
+        span = (max(peaks) - min(peaks)) if peaks else 0
+        if peak_all > 0 and span <= max(20, peak_all // 4):
+            print(f"结论: 这条通路一直在送**恒定值**(peak≈{peak_all},波动 {span})—— "
+                  "不是拾音,而是这条采集通路没有麦克风数据")
+            print("      常见于设备把采集端点做成空壳;换设备上的另一条通路(如蓝牙)再测对比")
+        else:
+            print(f"结论: 基本静音 —— 麦克风没有拾音(峰值波动 {span};"
+                  "设备侧静音/卡住,或系统默认设备不对)")
     return 0 if peak_all > 300 else 1
 
 
