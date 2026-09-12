@@ -280,6 +280,41 @@ def check_default_mic(rep: Report) -> None:
     rep.add("默认麦克风", OK, "当前 = " + "; ".join(shown))
 
 
+def check_mic_users(rep: Report) -> None:
+    """谁在用麦克风:读 Windows 自己的使用记录(LastUsedTimeStop=0 表示此刻在用)。"""
+    import winreg
+
+    hits = []
+    roots = (
+        (winreg.HKEY_CURRENT_USER, r"SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\CapabilityAccessManager\\ConsentStore\\microphone\\NonPackaged"),
+        (winreg.HKEY_CURRENT_USER, r"SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\CapabilityAccessManager\\ConsentStore\\microphone"),
+    )
+    for hive, path in roots:
+        try:
+            with winreg.OpenKey(hive, path) as key:
+                sub = 0
+                while True:
+                    try:
+                        name = winreg.EnumKey(key, sub)
+                    except OSError:
+                        break
+                    sub += 1
+                    try:
+                        with winreg.OpenKey(key, name) as sk:
+                            stop = winreg.QueryValueEx(sk, "LastUsedTimeStop")[0]
+                    except OSError:
+                        continue
+                    if stop == 0:
+                        hits.append(name.replace("#", "\\"))
+        except OSError:
+            continue
+    if hits:
+        rep.add("麦克风占用", WARN, "此刻正在使用: " + "; ".join(hits[:4]),
+                "若是设置页面/远程工具占用,关掉它们再测;独占模式能打开即说明没被独占")
+    else:
+        rep.add("麦克风占用", OK, "此刻没有 App 在使用麦克风")
+
+
 def check_console(rep: Report) -> None:
     listening = False
     try:
@@ -336,6 +371,7 @@ def main() -> int:
     ble_radio, ble_found = check_ble(rep, scan=not args.no_scan)
     check_console(rep)
     check_default_mic(rep)
+    check_mic_users(rep)
     check_wechat_ime(rep)
 
     if args.json:
