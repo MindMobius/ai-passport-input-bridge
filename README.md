@@ -82,7 +82,7 @@ Windows 上会失败。
 
 ## 硬件注意(实测)
 
-- **B&O Beoplay A1**:USB 音频的**采集通路恒为静音**(端点正常、播放正常、数据包准时但全零);它的**麦克风要用蓝牙(HFP)**才工作。详见 [docs/HARDWARE_NOTES.md](docs/HARDWARE_NOTES.md)。
+- **B&O Beoplay A1**:USB 音频的**采集通路恒为静音**(端点正常、播放正常、数据包准时但全零);它的**麦克风要用蓝牙(HFP)**才工作:同时插 USB + 连蓝牙时系统里会出现两条 A1 麦克风,蓝牙那条(`… 2- Beplay A1`)能用,USB 那条恒为静音。详见 [docs/HARDWARE_NOTES.md](docs/HARDWARE_NOTES.md)。
 
 ## 命名与后续
 

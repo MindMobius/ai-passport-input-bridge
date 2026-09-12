@@ -26,7 +26,14 @@ def main() -> int:
         hits = [i for i, d in enumerate(sd.query_devices())
                 if d["max_input_channels"] > 0 and args.device.lower() in d["name"].lower()]
         if not hits:
-            print(f"找不到输入设备: {args.device}", file=sys.stderr)
+            print(f"找不到输入设备: {args.device}\n", file=sys.stderr)
+            print("可用的输入设备(用 --device 里的片段匹配其中一个):", file=sys.stderr)
+            seen = set()
+            for i, d in enumerate(sd.query_devices()):
+                if d["max_input_channels"] > 0 and d["name"] not in seen:
+                    seen.add(d["name"])
+                    print(f"  [{i:3d}] {d['name']}", file=sys.stderr)
+            print("\n提示:名字要写全/写对,例如 --device \"Beoplay A1\"", file=sys.stderr)
             return 2
         dev = hits[0]
     else:
