@@ -14,6 +14,7 @@
 param(
     [string]$Match = 'VID_0CD4&PID_1004',
     [switch]$EnableOnly,
+    [switch]$Reinstall,
     [switch]$DryRun,
     [switch]$NoTest
 )
@@ -33,6 +34,7 @@ if (-not (Test-Admin)) {
         Write-Host "需要管理员权限,正在请求提权(会弹 UAC)..." -ForegroundColor Yellow
         $a = @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', $PSCommandPath, '-Match', $Match)
         if ($EnableOnly) { $a += '-EnableOnly' }
+        if ($Reinstall) { $a += '-Reinstall' }
         if ($NoTest) { $a += '-NoTest' }
         Start-Process -FilePath 'powershell.exe' -Verb RunAs -ArgumentList $a -Wait
         exit 0
@@ -60,7 +62,10 @@ $code = Get-ProblemCode $target.InstanceId
 Write-Host "  当前 ProblemCode: $code   (22 = 已禁用,需要启用)" -ForegroundColor Yellow
 
 if ($DryRun) {
-    Write-Host "[dry-run] 计划: $(if ($EnableOnly -or $code -eq 22) { 'pnputil /enable-device' } else { 'pnputil /restart-device(失败则 Disable+Enable)' })" -ForegroundColor Yellow
+    $plan = if ($Reinstall) { 'pnputil /remove-device + /scan-devices(重建驱动实例)' }
+             elseif ($EnableOnly -or $code -eq 22) { 'pnputil /enable-device' }
+             else { 'pnputil /restart-device(失败则 Disable+Enable)' }
+    Write-Host "[dry-run] 计划: $plan" -ForegroundColor Yellow
     exit 0
 }
 
@@ -71,6 +76,29 @@ function Invoke-Pnputil([string[]]$Args) {
     if ($text -match 'pending system reboot') { return 'pending' }
     if ($text -match 'Failed|denied|拒绝') { return 'fail' }
     return 'ok'
+}
+
+if ($Reinstall) {
+    Write-Host "[1/2] 卸载设备节点(驱动保留在 DriverStore)..." -ForegroundColor Cyan
+    Invoke-Pnputil @('/remove-device', $target.InstanceId) | Out-Null
+    if ($parent -and $parent.InstanceId -ne $target.InstanceId) {
+        Invoke-Pnputil @('/remove-device', $parent.InstanceId) | Out-Null
+    }
+    Start-Sleep -Seconds 3
+    Write-Host "[2/2] 重新扫描硬件,让它重新枚举并加载 usbaudio ..." -ForegroundColor Cyan
+    Invoke-Pnputil @('/scan-devices') | Out-Null
+    Start-Sleep -Seconds 6
+    $back = Get-PnpDevice -ErrorAction SilentlyContinue | Where-Object { $_.InstanceId -like "*$Match*" }
+    Write-Host "重新枚举结果:" -ForegroundColor Green
+    $back | ForEach-Object { Write-Host ("  [{0}] {1}  {2}" -f $_.Status, $_.FriendlyName, $_.InstanceId) }
+    if (-not $NoTest) {
+        Write-Host "`n现在对着 A1 说话/拍手,做 6 秒电平测试:" -ForegroundColor Cyan
+        $repo = Split-Path -Parent $PSScriptRoot
+        $pyexe = Join-Path $repo '.venv\Scripts\python.exe'
+        $tool = Join-Path $PSScriptRoot 'mic-level-test.py'
+        if ((Test-Path $pyexe) -and (Test-Path $tool)) { & $pyexe $tool --device 'Beoplay A1' --seconds 6 }
+    }
+    exit 0
 }
 
 $disabled = ($EnableOnly -or $code -eq 22)
